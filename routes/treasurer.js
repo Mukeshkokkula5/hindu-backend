@@ -68,8 +68,23 @@ router.patch("/approve-member/:id",
   verifyToken,
   checkRole("TREASURER","SUPER_ADMIN"),
   async (req,res)=>{
+    const client = await pool.connect();
     try{
-      const { rowCount } = await pool.query(`
+      await client.query("BEGIN");
+
+      const contRes = await client.query(
+        `SELECT fund_id, amount FROM contributions WHERE id=$1 AND source='MEMBER' AND status='PENDING' FOR UPDATE`,
+        [req.params.id]
+      );
+
+      if(!contRes.rows.length) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({error:"Invalid or already processed"});
+      }
+
+      const { fund_id, amount } = contRes.rows[0];
+
+      await client.query(`
         UPDATE contributions
         SET status='APPROVED',
             approved_by=$1,
@@ -77,15 +92,31 @@ router.patch("/approve-member/:id",
             receipt_no = 'HYW-' || EXTRACT(YEAR FROM NOW()) || '-' || LPAD(id::text,6,'0'),
             receipt_date = NOW(),
             qr_locked = true
-        WHERE id=$2 AND source='MEMBER' AND status='PENDING'
+        WHERE id=$2
       `,[req.user.id, req.params.id]);
 
-      if(!rowCount)
-        return res.status(400).json({error:"Invalid or already processed"});
+      // Calculate new balance
+      const balRes = await client.query(
+        `SELECT COALESCE(balance_after,0) AS balance FROM ledger WHERE fund_id=$1 ORDER BY id DESC LIMIT 1`,
+        [fund_id]
+      );
+      const currentBalance = balRes.rows.length > 0 ? Number(balRes.rows[0].balance) : 0;
+      const newBalance = currentBalance + Number(amount);
 
+      // Insert CREDIT entry into ledger
+      await client.query(
+        `INSERT INTO ledger (entry_type, source, source_id, fund_id, amount, balance_after, created_by)
+         VALUES ('CREDIT', 'CONTRIBUTION', $1, $2, $3, $4, $5)`,
+        [req.params.id, fund_id, amount, newBalance, req.user.id]
+      );
+
+      await client.query("COMMIT");
       res.json({message:"Member donation approved"});
     }catch(e){
+      await client.query("ROLLBACK");
       res.status(500).json({error:e.message});
+    }finally{
+      client.release();
     }
 });
 
@@ -96,8 +127,23 @@ router.patch("/approve-public/:id",
   verifyToken,
   checkRole("TREASURER","SUPER_ADMIN"),
   async (req,res)=>{
+    const client = await pool.connect();
     try{
-      const { rows } = await pool.query(`
+      await client.query("BEGIN");
+
+      const contRes = await client.query(
+        `SELECT fund_id, amount FROM contributions WHERE id=$1 AND source != 'MEMBER' AND status='PENDING' FOR UPDATE`,
+        [req.params.id]
+      );
+
+      if(!contRes.rows.length) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({error:"Invalid or already processed"});
+      }
+
+      const { fund_id, amount } = contRes.rows[0];
+
+      const updateRes = await client.query(`
         UPDATE contributions
         SET status='APPROVED',
             approved_by=$1,
@@ -105,28 +151,47 @@ router.patch("/approve-public/:id",
             receipt_no = 'HYW-' || EXTRACT(YEAR FROM NOW()) || '-' || LPAD(id::text,6,'0'),
             receipt_date = NOW(),
             qr_locked = true
-        WHERE id=$2 AND source='PUBLIC' AND status='PENDING'
+        WHERE id=$2
         RETURNING donor_email, donor_name, receipt_no, amount, fund_id, receipt_date
       `,[req.user.id, req.params.id]);
 
-      if(!rows.length)
-        return res.status(400).json({error:"Invalid or already processed"});
+      // Calculate new balance
+      const balRes = await client.query(
+        `SELECT COALESCE(balance_after,0) AS balance FROM ledger WHERE fund_id=$1 ORDER BY id DESC LIMIT 1`,
+        [fund_id]
+      );
+      const currentBalance = balRes.rows.length > 0 ? Number(balRes.rows[0].balance) : 0;
+      const newBalance = currentBalance + Number(amount);
 
-      const fund = await pool.query("SELECT fund_name FROM funds WHERE id=$1",[rows[0].fund_id]);
+      // Insert CREDIT entry into ledger
+      await client.query(
+        `INSERT INTO ledger (entry_type, source, source_id, fund_id, amount, balance_after, created_by)
+         VALUES ('CREDIT', 'CONTRIBUTION', $1, $2, $3, $4, $5)`,
+        [req.params.id, fund_id, amount, newBalance, req.user.id]
+      );
 
-      await sendReceiptEmail({
-        ...rows[0],
-        fund_name: fund.rows[0].fund_name
-      });
+      const fund = await client.query("SELECT fund_name FROM funds WHERE id=$1",[fund_id]);
 
+      try {
+        await sendReceiptEmail({
+          ...updateRes.rows[0],
+          fund_name: fund.rows[0].fund_name
+        });
+      } catch (emailErr) {
+        console.warn("Receipt email failed to send, proceeding with approval:", emailErr.message);
+      }
+
+      await client.query("COMMIT");
       res.json({
         message:"Public donation approved and receipt emailed",
-        receipt: rows[0].receipt_no
+        receipt: updateRes.rows[0].receipt_no
       });
-
     }catch(e){
+      await client.query("ROLLBACK");
       console.error(e);
-      res.status(500).json({error:"Approve or email failed"});
+      res.status(500).json({error:"Approve or email failed: " + e.message});
+    }finally{
+      client.release();
     }
 });
 
@@ -171,7 +236,7 @@ router.patch("/reject-public/:id",
           cancel_reason=$1,
           cancelled_by=$2,
           cancelled_at=NOW()
-      WHERE id=$3 AND source='PUBLIC' AND status='PENDING'
+      WHERE id=$3 AND source != 'MEMBER' AND status='PENDING'
     `,[reason, req.user.id, req.params.id]);
 
     if(!rowCount)

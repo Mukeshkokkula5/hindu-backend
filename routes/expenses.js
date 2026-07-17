@@ -160,7 +160,8 @@ router.put(
         [expense.fund_id]
       );
 
-      const currentBalance = Number(balRes.rows[0].balance);
+      const currentBalance =
+        balRes.rows.length > 0 ? Number(balRes.rows[0].balance) : 0;
 
       if (currentBalance < expense.amount) {
         throw new Error("Insufficient fund balance");
@@ -279,7 +280,7 @@ router.put(
       );
 
       const newBalance =
-        Number(balRes.rows[0].balance_after) + Number(expense.amount);
+        (balRes.rows.length > 0 ? Number(balRes.rows[0].balance_after) : 0) + Number(expense.amount);
 
       await client.query(
         `

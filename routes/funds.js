@@ -22,6 +22,7 @@ router.get(
           f.id,
           f.fund_name,
           f.fund_type,
+          f.base_amount,
           f.status,
 
           COALESCE((
@@ -60,21 +61,25 @@ router.post(
   checkRole("SUPER_ADMIN", "PRESIDENT"),
   async (req, res) => {
     try {
-      const { fund_name, fund_type, description } = req.body;
+      const { fund_name, fund_type, description, base_amount } = req.body;
 
       if (!fund_name || !fund_type) {
         return res.status(400).json({ error: "Missing required fields" });
       }
 
+      const parsedBaseAmount = base_amount !== undefined ? Number(base_amount) : 
+        (description && description.startsWith("Base Amount: ") ? Number(description.replace("Base Amount: ", "")) : 0);
+
       const result = await pool.query(
         `
-        INSERT INTO funds (fund_name, fund_type, description, status)
-        VALUES ($1, $2, $3, 'ACTIVE')
+        INSERT INTO funds (fund_name, fund_type, description, base_amount, status)
+        VALUES ($1, $2, $3, $4, 'ACTIVE')
         RETURNING *
         `,
-        [fund_name, fund_type, description || null]
+        [fund_name, fund_type, description || null, parsedBaseAmount]
       );
 
+      const logAudit = require("../utils/auditLogger");
       await logAudit("CREATE", "FUND", result.rows[0].id, req.user.id);
       res.status(201).json(result.rows[0]);
     } catch (err) {
