@@ -85,4 +85,44 @@ router.post("/donate", async (req, res) => {
   }
 });
 
+/* =========================
+   📄 PUBLIC SINGLE CONTRIBUTION (RECEIPT VIEW)
+   GET /public/contribution/:token
+========================= */
+router.get("/contribution/:token", async (req, res) => {
+  try {
+    const { token } = req.params;
+    const { rows } = await pool.query(
+      `
+      SELECT 
+        c.id,
+        c.receipt_date AS date,
+        COALESCE(c.donor_name, u.name) AS title,
+        c.source AS category,
+        f.fund_name,
+        c.amount,
+        c.payment_note AS desc,
+        COALESCE(c.donor_phone, u.phone) AS phone,
+        c.status,
+        c.public_token
+      FROM contributions c
+      LEFT JOIN users u ON u.id = c.member_id
+      LEFT JOIN funds f ON f.id = c.fund_id
+      WHERE c.public_token = $1
+      `,
+      [token]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ success: false, error: "Contribution not found" });
+    }
+
+    res.json({ success: true, data: rows[0] });
+  } catch (err) {
+    console.error("GET PUBLIC CONTRIBUTION ERROR 👉", err.message);
+    res.status(500).json({ success: false, error: "Server error" });
+  }
+});
+
 module.exports = router;
+

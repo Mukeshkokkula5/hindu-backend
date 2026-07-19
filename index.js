@@ -86,11 +86,26 @@ app.use(
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 /* =========================
-   🔌 DB HEALTH CHECK
+   🔌 DB HEALTH CHECK & MIGRATIONS
 ========================= */
 pool
   .query("SELECT 1")
-  .then(() => console.log("✅ DB Connected"))
+  .then(async () => {
+    console.log("✅ DB Connected");
+    try {
+      // Add public_token column with default MD5 token generation if it does not exist
+      await pool.query(
+        "ALTER TABLE contributions ADD COLUMN IF NOT EXISTS public_token VARCHAR(64) UNIQUE DEFAULT md5(random()::text || clock_timestamp()::text)"
+      );
+      // Generate tokens for any old rows that didn't have one before
+      await pool.query(
+        "UPDATE contributions SET public_token = md5(random()::text || clock_timestamp()::text) WHERE public_token IS NULL"
+      );
+      console.log("✅ DB Migrations completed successfully");
+    } catch (err) {
+      console.error("❌ DB Migrations failed:", err.message);
+    }
+  })
   .catch((err) => console.error("❌ DB Error:", err.message));
 
 /* =========================

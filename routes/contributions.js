@@ -161,7 +161,7 @@ router.post(
   async (req, res) => {
     const client = await pool.connect();
     try {
-      const { title, category, fund_id, amount, receipt_date, description } = req.body;
+      const { title, category, fund_id, amount, receipt_date, description, donor_phone } = req.body;
 
       if (!title || !amount || amount <= 0 || !fund_id || !receipt_date) {
         return res.status(400).json({ error: "Missing required fields" });
@@ -182,9 +182,10 @@ router.post(
           payment_note,
           status,
           receipt_date,
+          donor_phone,
           qr_locked
         )
-        VALUES ($1, $2, $3, $4, $5, 'CASH', $6, 'PENDING', $7, true)
+        VALUES ($1, $2, $3, $4, $5, 'CASH', $6, 'PENDING', $7, $8, true)
         RETURNING *
         `,
         [
@@ -195,6 +196,7 @@ router.post(
           amount,
           description || null,
           receipt_date,
+          donor_phone || null,
         ]
       );
 
@@ -241,7 +243,9 @@ router.get(
           f.fund_name,
           c.amount,
           c.payment_note AS desc,
-          c.status
+          COALESCE(c.donor_phone, u.phone) AS phone,
+          c.status,
+          c.public_token
         FROM contributions c
         LEFT JOIN users u ON u.id = c.member_id
         LEFT JOIN funds f ON f.id = c.fund_id
@@ -252,6 +256,61 @@ router.get(
     } catch (err) {
       console.error("ADMIN GET CONTRIBUTIONS LIST ERROR 👉", err.message);
       res.status(500).json({ error: "Failed to load donations list" });
+    }
+  }
+);
+
+
+/* =====================================================
+   7️⃣ DELETE CONTRIBUTION/DONATION
+   DELETE /contributions/:id
+===================================================== */
+router.delete(
+  "/:id",
+  verifyToken,
+  checkRole("TREASURER", "SUPER_ADMIN", "PRESIDENT"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      await pool.query("DELETE FROM contributions WHERE id = $1", [id]);
+      res.json({ message: "Donation deleted successfully" });
+    } catch (err) {
+      console.error("DELETE CONTRIBUTION ERROR 👉", err.message);
+      res.status(500).json({ error: "Failed to delete donation" });
+    }
+  }
+);
+
+/* =====================================================
+   8️⃣ UPDATE CONTRIBUTION/DONATION
+   PUT /contributions/:id
+===================================================== */
+router.put(
+  "/:id",
+  verifyToken,
+  checkRole("TREASURER", "SUPER_ADMIN", "PRESIDENT"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { title, fund_id, amount, receipt_date, description, donor_phone } = req.body;
+      
+      await pool.query(
+        `
+        UPDATE contributions
+        SET donor_name = $1,
+            fund_id = $2,
+            amount = $3,
+            receipt_date = $4,
+            payment_note = $5,
+            donor_phone = $6
+        WHERE id = $7
+        `,
+        [title, fund_id, amount, receipt_date, description, donor_phone, id]
+      );
+      res.json({ message: "Donation updated successfully" });
+    } catch (err) {
+      console.error("UPDATE CONTRIBUTION ERROR 👉", err.message);
+      res.status(500).json({ error: "Failed to update donation" });
     }
   }
 );
