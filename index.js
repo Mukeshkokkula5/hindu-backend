@@ -1,4 +1,10 @@
-require("dotenv").config();
+const dotenv = require("dotenv");
+const envFile =
+  process.env.NODE_ENV === "production"
+    ? ".env.production"
+    : ".env.development";
+dotenv.config({ path: envFile });
+dotenv.config(); // Fallback to standard .env if specific one doesn't exist
 
 const express = require("express");
 const helmet = require("helmet");
@@ -22,7 +28,7 @@ app.set("trust proxy", 1);
 app.use(
   helmet({
     crossOriginResourcePolicy: false,
-  })
+  }),
 );
 
 /* =========================
@@ -46,17 +52,17 @@ app.use(
       }
 
       // ❗ IMPORTANT: do NOT throw error
-       return callback(null, true);
+      return callback(null, true);
     },
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [
-  "Content-Type",
-  "Authorization",
-  "Cache-Control",
-  "Pragma"
-],
+      "Content-Type",
+      "Authorization",
+      "Cache-Control",
+      "Pragma",
+    ],
     credentials: true,
-  })
+  }),
 );
 
 // 🔥 Preflight support (VERY IMPORTANT)
@@ -77,7 +83,7 @@ app.use(
     max: 200,
     standardHeaders: true,
     legacyHeaders: false,
-  })
+  }),
 );
 
 /* =========================
@@ -95,12 +101,42 @@ pool
     try {
       // Add public_token column with default MD5 token generation if it does not exist
       await pool.query(
-        "ALTER TABLE contributions ADD COLUMN IF NOT EXISTS public_token VARCHAR(64) UNIQUE DEFAULT md5(random()::text || clock_timestamp()::text)"
+        "ALTER TABLE contributions ADD COLUMN IF NOT EXISTS public_token VARCHAR(64) UNIQUE DEFAULT md5(random()::text || clock_timestamp()::text)",
       );
       // Generate tokens for any old rows that didn't have one before
       await pool.query(
-        "UPDATE contributions SET public_token = md5(random()::text || clock_timestamp()::text) WHERE public_token IS NULL"
+        "UPDATE contributions SET public_token = md5(random()::text || clock_timestamp()::text) WHERE public_token IS NULL",
       );
+      // Create qr_transactions table for scanner payments
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS qr_transactions (
+          id SERIAL PRIMARY KEY,
+          payer_name VARCHAR(255) NOT NULL,
+          amount DECIMAL(10,2) NOT NULL,
+          transaction_id VARCHAR(100) UNIQUE NOT NULL,
+          status VARCHAR(20) DEFAULT 'PENDING',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      // Create pg_transactions table for Razorpay payments
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS pg_transactions (
+          id SERIAL PRIMARY KEY,
+          order_id VARCHAR(100) UNIQUE NOT NULL,
+          payment_id VARCHAR(100),
+          payer_name VARCHAR(255) NOT NULL,
+          amount DECIMAL(10,2) NOT NULL,
+          status VARCHAR(20) DEFAULT 'PENDING',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      // Add extra donor details columns if they don't exist
+      await pool.query(`
+        ALTER TABLE pg_transactions 
+        ADD COLUMN IF NOT EXISTS email VARCHAR(255),
+        ADD COLUMN IF NOT EXISTS mobile_number VARCHAR(20),
+        ADD COLUMN IF NOT EXISTS address TEXT;
+      `);
       console.log("✅ DB Migrations completed successfully");
     } catch (err) {
       console.error("❌ DB Migrations failed:", err.message);
@@ -144,6 +180,8 @@ app.use("/complaints", require("./routes/complaints"));
 app.use("/meetings", require("./routes/meetings"));
 app.use("/announcements", require("./routes/announcements"));
 app.use("/contributions", require("./routes/contributions"));
+app.use("/qr-transactions", require("./routes/qrTransactions"));
+app.use("/payment", require("./routes/paymentGateway"));
 
 /* =========================
    🏠 ROOT & HEALTH

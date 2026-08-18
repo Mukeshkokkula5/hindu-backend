@@ -11,6 +11,20 @@ const checkRole = require("../middleware/checkRole");
 const FINANCE_ROLES = ["TREASURER", "SUPER_ADMIN", "PRESIDENT"];
 
 /* =====================================================
+   0️⃣ PUBLIC FUNDS (NO TOKEN REQUIRED)
+   GET /contributions/funds
+===================================================== */
+router.get("/funds", async (req, res) => {
+  try {
+    const { rows } = await pool.query(`SELECT fund_name as name FROM funds WHERE status = 'ACTIVE' ORDER BY id ASC`);
+    res.json(rows.map(r => r.name));
+  } catch (err) {
+    console.error("FETCH FUNDS ERROR 👉", err.message);
+    res.status(500).json({ error: "Failed to load funds" });
+  }
+});
+
+/* =====================================================
    1️⃣ CREATE CONTRIBUTION (ALL LOGGED-IN USERS)
    POST /contributions/submit
 ===================================================== */

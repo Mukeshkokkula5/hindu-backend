@@ -1,0 +1,193 @@
+const express = require("express");
+const router = express.Router();
+const crypto = require("crypto");
+const Razorpay = require("razorpay");
+const pool = require("../db");
+const sendReceiptEmail = require("../utils/sendReceiptEmail");
+
+// Initialize Razorpay (ensure these are set in your .env file)
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID || 'dummy_key',
+  key_secret: process.env.RAZORPAY_KEY_SECRET || 'dummy_secret',
+});
+
+/* =====================================================
+   1️⃣ CREATE RAZORPAY ORDER
+   POST /payment/create-order
+===================================================== */
+router.post("/create-order", async (req, res) => {
+  try {
+    const { payer_name, amount, email, mobile_number, address, fund_type } = req.body;
+
+    if (!payer_name || !amount || !email || !mobile_number || !address || !fund_type) {
+      return res.status(400).json({ error: "Missing required fields (name, amount, email, mobile, address, fund_type)" });
+    }
+
+    // Razorpay amount is in paise (multiply by 100)
+    const options = {
+      amount: amount * 100,
+      currency: "INR",
+      receipt: `receipt_${Date.now()}`,
+    };
+
+    const order = await razorpay.orders.create(options);
+
+    // Save pending transaction to DB
+    await pool.query(
+      `
+      INSERT INTO pg_transactions (order_id, payer_name, amount, email, mobile_number, address, fund_type, status)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')
+      `,
+      [order.id, payer_name, amount, email, mobile_number, address, fund_type]
+    );
+
+    res.json({
+      success: true,
+      order_id: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      key_id: process.env.RAZORPAY_KEY_ID, // Send key to frontend
+    });
+  } catch (err) {
+    console.error("RAZORPAY CREATE ORDER ERROR 👉", err);
+    res.status(500).json({ error: "Failed to create order" });
+  }
+});
+
+/* =====================================================
+   2️⃣ RAZORPAY WEBHOOK (Automated Verification)
+   POST /payment/webhook
+===================================================== */
+router.post("/webhook", express.raw({ type: 'application/json' }), async (req, res) => {
+  try {
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    const signature = req.headers['x-razorpay-signature'];
+    
+    if (!secret) {
+        console.error("Missing RAZORPAY_WEBHOOK_SECRET in .env");
+        return res.status(500).json({ error: "Server configuration error" });
+    }
+
+    // Verify Webhook Signature
+    const shasum = crypto.createHmac('sha256', secret);
+    shasum.update(req.body);
+    const digest = shasum.digest('hex');
+
+    if (digest === signature) {
+      // Body is raw Buffer because of express.raw(), parse it
+      const payloadString = req.body.toString('utf8');
+      const payloadData = JSON.parse(payloadString);
+      const event = payloadData.event;
+      
+      if (event === 'payment.captured') {
+        const paymentData = payloadData.payload.payment.entity;
+        const order_id = paymentData.order_id;
+        const payment_id = paymentData.id;
+
+        // Update database transaction to SUCCESS and returning the row
+        const { rows } = await pool.query(
+          `UPDATE pg_transactions SET status = 'SUCCESS', payment_id = $1 WHERE order_id = $2 RETURNING *`,
+          [payment_id, order_id]
+        );
+        console.log(`✅ Payment successful for order: ${order_id}`);
+
+        // Send Email Receipt
+        if (rows.length > 0) {
+          const transaction = rows[0];
+          await sendReceiptEmail({
+            donor_email: transaction.email,
+            donor_name: transaction.payer_name,
+            receipt_no: transaction.order_id,
+            amount: transaction.amount,
+            fund_name: transaction.fund_type,
+            receipt_date: transaction.created_at,
+          });
+        }
+      }
+
+      res.status(200).json({ status: "ok" });
+    } else {
+      res.status(400).json({ error: "Invalid signature" });
+    }
+  } catch (err) {
+    console.error("WEBHOOK ERROR 👉", err.message);
+    res.status(500).json({ error: "Webhook failed" });
+  }
+});
+
+/* =====================================================
+   2.5️⃣ MANUAL VERIFICATION (Frontend Fallback)
+   POST /payment/verify
+===================================================== */
+router.post("/verify", express.json(), async (req, res) => {
+  try {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    const secret = process.env.RAZORPAY_KEY_SECRET;
+
+    const shasum = crypto.createHmac('sha256', secret);
+    shasum.update(`${razorpay_order_id}|${razorpay_payment_id}`);
+    const digest = shasum.digest('hex');
+
+    if (digest === razorpay_signature) {
+      // Update database transaction to SUCCESS
+      const { rows } = await pool.query(
+        `UPDATE pg_transactions SET status = 'SUCCESS', payment_id = $1 WHERE order_id = $2 RETURNING *`,
+        [razorpay_payment_id, razorpay_order_id]
+      );
+
+      // Send Email Receipt
+      if (rows.length > 0 && rows[0].status === 'SUCCESS') {
+        const transaction = rows[0];
+        // Only send if it wasn't already marked SUCCESS by webhook
+        await sendReceiptEmail({
+          donor_email: transaction.email,
+          donor_name: transaction.payer_name,
+          receipt_no: transaction.order_id,
+          amount: transaction.amount,
+          fund_name: transaction.fund_type,
+          receipt_date: transaction.created_at,
+        });
+      }
+
+      res.json({ success: true, message: "Payment verified successfully" });
+    } else {
+      res.status(400).json({ success: false, error: "Invalid signature" });
+    }
+  } catch (err) {
+    console.error("VERIFY ERROR 👉", err.message);
+    res.status(500).json({ success: false, error: "Verification failed" });
+  }
+});
+
+/* =====================================================
+   3️⃣ GET ALL TRANSACTIONS (ADMIN/TREASURER)
+   GET /payment/transactions
+===================================================== */
+const verifyToken = require("../middleware/verifyToken");
+const checkRole = require("../middleware/checkRole");
+
+router.get("/transactions", verifyToken, checkRole("TREASURER", "SUPER_ADMIN", "PRESIDENT"), async (req, res) => {
+  try {
+    const { rows } = await pool.query(`SELECT * FROM pg_transactions ORDER BY created_at DESC`);
+    res.json(rows);
+  } catch (err) {
+    console.error("FETCH TRANSACTIONS ERROR 👉", err.message);
+    res.status(500).json({ error: "Failed to fetch transactions" });
+  }
+});
+
+/* =====================================================
+   4️⃣ GET ALL FUND TYPES
+   GET /payment/fund-types
+===================================================== */
+router.get("/fund-types", async (req, res) => {
+  try {
+    const { rows } = await pool.query(`SELECT fund_name as name FROM funds WHERE status = 'ACTIVE' ORDER BY id ASC`);
+    res.json(rows.map(r => r.name));
+  } catch (err) {
+    console.error("FETCH FUND TYPES ERROR 👉", err.message);
+    res.status(500).json({ error: "Failed to fetch fund types" });
+  }
+});
+
+module.exports = router;
