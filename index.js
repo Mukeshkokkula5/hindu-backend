@@ -38,6 +38,7 @@ const allowedOrigins = [
   "https://hinduswarajyouth.online",
   "https://www.hinduswarajyouth.online",
   "https://api.hinduswarajyouth.online",
+  "https://hindu-swaraj.vercel.app",
   "http://localhost:3000",
 ];
 
