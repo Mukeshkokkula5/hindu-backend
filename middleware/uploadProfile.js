@@ -5,9 +5,10 @@ const fs = require("fs");
 /* =========================
    ENSURE UPLOAD DIRECTORY
 ========================= */
-const uploadDir = "uploads/profile-dp";
+const isProd = process.env.NODE_ENV === "production";
+const uploadDir = isProd ? "/tmp" : "uploads/profile-dp";
 
-if (!fs.existsSync(uploadDir)) {
+if (!isProd && !fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 

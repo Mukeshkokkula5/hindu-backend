@@ -3,7 +3,8 @@ const path = require("path");
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, "uploads/");
+    const dest = process.env.NODE_ENV === "production" ? "/tmp" : "uploads/";
+    cb(null, dest);
   },
   filename: (req, file, cb) => {
     cb(null, "association-logo" + path.extname(file.originalname));

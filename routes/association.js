@@ -10,7 +10,7 @@ const path = require("path");
    MULTER CONFIG
 ========================= */
 const storage = multer.diskStorage({
-  destination: "uploads/",
+  destination: process.env.NODE_ENV === "production" ? "/tmp" : "uploads/",
   filename: (_, file, cb) => {
     cb(null, Date.now() + path.extname(file.originalname));
   },

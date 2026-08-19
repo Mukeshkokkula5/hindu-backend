@@ -8,8 +8,9 @@ const path = require("path");
 const fs = require("fs");
 
 /* ================= ENSURE UPLOAD DIR ================= */
-const uploadDir = path.join("uploads", "logo");
-if (!fs.existsSync(uploadDir)) {
+const isProd = process.env.NODE_ENV === "production";
+const uploadDir = isProd ? "/tmp" : path.join("uploads", "logo");
+if (!isProd && !fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
