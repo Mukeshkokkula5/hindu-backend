@@ -17,7 +17,7 @@ const razorpay = new Razorpay({
 ===================================================== */
 router.post("/create-order", async (req, res) => {
   try {
-    const { payer_name, amount, email, mobile_number, address, fund_type } = req.body;
+    const { payer_name, amount, email, mobile_number, address, fund_type, member_id } = req.body;
 
     if (!payer_name || !amount || !email || !mobile_number || !address || !fund_type) {
       return res.status(400).json({ error: "Missing required fields (name, amount, email, mobile, address, fund_type)" });
@@ -35,10 +35,10 @@ router.post("/create-order", async (req, res) => {
     // Save pending transaction to DB
     await pool.query(
       `
-      INSERT INTO pg_transactions (order_id, payer_name, amount, email, mobile_number, address, fund_type, status)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')
+      INSERT INTO pg_transactions (order_id, payer_name, amount, email, mobile_number, address, fund_type, status, member_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8)
       `,
-      [order.id, payer_name, amount, email, mobile_number, address, fund_type]
+      [order.id, payer_name, amount, email, mobile_number, address, fund_type, member_id || null]
     );
 
     res.json({
@@ -177,7 +177,27 @@ router.get("/transactions", verifyToken, checkRole("TREASURER", "SUPER_ADMIN", "
 });
 
 /* =====================================================
-   4️⃣ GET ALL FUND TYPES
+   4✅ GET MY TRANSACTIONS (MEMBER)
+   GET /payment/my-transactions
+===================================================== */
+router.get("/my-transactions", verifyToken, async (req, res) => {
+  try {
+    const { id } = req.user;
+    const userRes = await pool.query(`SELECT personal_email FROM users WHERE id = $1`, [id]);
+    if (userRes.rows.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const email = userRes.rows[0].personal_email;
+    const { rows } = await pool.query(`SELECT * FROM pg_transactions WHERE member_id = $1 OR email = $2 ORDER BY created_at DESC`, [id, email]);
+    res.json(rows);
+  } catch (err) {
+    console.error("FETCH MY TRANSACTIONS ERROR", err.message);
+    res.status(500).json({ error: "Failed to fetch transactions" });
+  }
+});
+
+/* =====================================================
+   5✅ GET ALL FUND TYPES
    GET /payment/fund-types
 ===================================================== */
 router.get("/fund-types", async (req, res) => {
