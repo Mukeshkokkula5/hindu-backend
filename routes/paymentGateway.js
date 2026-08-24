@@ -105,10 +105,13 @@ router.post("/webhook", express.raw({ type: 'application/json' }), async (req, r
         // Send Email Receipt
         if (rows.length > 0) {
           const transaction = rows[0];
+          const formattedReceiptNo = transaction.order_id
+            ? transaction.order_id.replace(/^order_/, "HSYWA-")
+            : `HSYWA-${String(transaction.id).padStart(6, "0")}`;
           await sendReceiptEmail({
             donor_email: transaction.email,
             donor_name: transaction.payer_name,
-            receipt_no: transaction.order_id,
+            receipt_no: formattedReceiptNo,
             amount: transaction.amount,
             fund_name: transaction.fund_type,
             receipt_date: transaction.created_at,
@@ -158,11 +161,14 @@ router.post("/verify", express.json(), async (req, res) => {
       // Send Email Receipt
       if (rows.length > 0 && rows[0].status === 'SUCCESS') {
         const transaction = rows[0];
+        const formattedReceiptNo = transaction.order_id
+          ? transaction.order_id.replace(/^order_/, "HSYWA-")
+          : `HSYWA-${String(transaction.id).padStart(6, "0")}`;
         try {
           await sendReceiptEmail({
             donor_email: transaction.email,
             donor_name: transaction.payer_name,
-            receipt_no: transaction.order_id,
+            receipt_no: formattedReceiptNo,
             amount: transaction.amount,
             fund_name: transaction.fund_type,
             receipt_date: transaction.created_at,
@@ -174,11 +180,11 @@ router.post("/verify", express.json(), async (req, res) => {
 
       res.json({ success: true, message: "Payment verified successfully" });
     } else {
-      res.status(400).json({ success: false, error: "Invalid signature" });
+      res.status(400).json({ error: "Invalid payment signature" });
     }
   } catch (err) {
-    console.error("VERIFY ERROR 👉", err.message);
-    res.status(500).json({ success: false, error: "Verification failed" });
+    console.error("VERIFY PAYMENT ERROR 👉", err.message);
+    res.status(500).json({ error: "Payment verification failed" });
   }
 });
 
@@ -214,7 +220,7 @@ router.get("/my-transactions", verifyToken, async (req, res) => {
     let pgRows = [];
     try {
       const pgRes = await pool.query(
-        `SELECT id::text, order_id, fund_type, amount, status, created_at, NULL::text as receipt_no, 'ONLINE' as source 
+        `SELECT id::text, order_id, fund_type, amount, status, created_at, REPLACE(order_id, 'order_', 'HSYWA-') as receipt_no, 'ONLINE' as source 
          FROM pg_transactions 
          WHERE member_id = $1 OR (email IS NOT NULL AND email = $2) 
          ORDER BY created_at DESC`,

@@ -131,7 +131,7 @@ router.get("/contribution/:token", async (req, res) => {
           COALESCE(pg.mobile_number, u.phone) AS phone,
           pg.status,
           pg.order_id AS public_token,
-          COALESCE(pg.order_id, CONCAT('HSY-PG-', pg.id)) AS receipt_no
+          REPLACE(pg.order_id, 'order_', 'HSYWA-') AS receipt_no
         FROM pg_transactions pg
         LEFT JOIN users u ON u.id = pg.member_id
         WHERE pg.order_id = $1 OR pg.id::text = $1 OR pg.payment_id = $1
