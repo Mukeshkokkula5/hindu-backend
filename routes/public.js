@@ -92,26 +92,54 @@ router.post("/donate", async (req, res) => {
 router.get("/contribution/:token", async (req, res) => {
   try {
     const { token } = req.params;
-    const { rows } = await pool.query(
+
+    // 1. Try contributions table (matches public_token, ID, reference_no, or receipt_no)
+    let { rows } = await pool.query(
       `
       SELECT 
         c.id,
-        c.receipt_date AS date,
+        COALESCE(c.receipt_date, c.created_at) AS date,
         COALESCE(c.donor_name, u.name) AS title,
         c.source AS category,
-        f.fund_name,
+        COALESCE(f.fund_name, 'Youth Development Programs') AS fund_name,
         c.amount,
         c.payment_note AS desc,
         COALESCE(c.donor_phone, u.phone) AS phone,
         c.status,
-        c.public_token
+        COALESCE(c.public_token, c.id::text) AS public_token,
+        COALESCE(c.receipt_no, c.reference_no, CONCAT('HSY-REC-', c.id)) AS receipt_no
       FROM contributions c
       LEFT JOIN users u ON u.id = c.member_id
       LEFT JOIN funds f ON f.id = c.fund_id
-      WHERE c.public_token = $1
+      WHERE c.public_token = $1 OR c.id::text = $1 OR c.reference_no = $1 OR c.receipt_no = $1
       `,
       [token]
     );
+
+    // 2. Fallback to pg_transactions if not found in contributions
+    if (!rows.length) {
+      const pgRes = await pool.query(
+        `
+        SELECT 
+          pg.id,
+          pg.created_at AS date,
+          COALESCE(pg.payer_name, u.name) AS title,
+          'ONLINE' AS category,
+          COALESCE(pg.fund_type, 'Youth Development Programs') AS fund_name,
+          pg.amount,
+          CONCAT('Order ID: ', pg.order_id) AS desc,
+          COALESCE(pg.mobile_number, u.phone) AS phone,
+          pg.status,
+          pg.order_id AS public_token,
+          COALESCE(pg.order_id, CONCAT('HSY-PG-', pg.id)) AS receipt_no
+        FROM pg_transactions pg
+        LEFT JOIN users u ON u.id = pg.member_id
+        WHERE pg.order_id = $1 OR pg.id::text = $1 OR pg.payment_id = $1
+        `,
+        [token]
+      );
+      rows = pgRes.rows;
+    }
 
     if (!rows.length) {
       return res.status(404).json({ success: false, error: "Contribution not found" });

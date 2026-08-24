@@ -175,15 +175,17 @@ router.post(
   async (req, res) => {
     const client = await pool.connect();
     try {
-      const { title, category, fund_id, amount, receipt_date, description, donor_phone } = req.body;
+      const { title, category, fund_id, amount, receipt_date, description, donor_phone, member_id, target_member_id } = req.body;
 
       if (!title || !amount || amount <= 0 || !fund_id || !receipt_date) {
         return res.status(400).json({ error: "Missing required fields" });
       }
 
+      const assignedMemberId = member_id || target_member_id || req.user.id;
+
       await client.query("BEGIN");
 
-      // 1. Insert into contributions as PENDING, storing admin's ID as member_id (who created it)
+      // 1. Insert into contributions as PENDING
       const contRes = await client.query(
         `
         INSERT INTO contributions (
@@ -203,7 +205,7 @@ router.post(
         RETURNING *
         `,
         [
-          req.user.id,
+          assignedMemberId,
           title,
           category || "DONATION",
           fund_id,

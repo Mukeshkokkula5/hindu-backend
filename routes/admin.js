@@ -357,22 +357,44 @@ router.get(
   checkRole("SUPER_ADMIN"),
   async (req, res) => {
     try {
-      const result = await pool.query(`
-        SELECT
-          id,
-          action,
-          entity,
-          entity_id,
-          performed_by,
-          user_id,
-          metadata,
-          created_at
-        FROM audit_logs
-        ORDER BY created_at DESC
-        LIMIT 100
-      `);
+      const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+      const limit = Math.max(1, parseInt(req.query.limit, 10) || 10);
+      const offset = (page - 1) * limit;
 
-      res.json(result.rows);
+      const countRes = await pool.query("SELECT COUNT(*) FROM audit_logs");
+      const totalCount = parseInt(countRes.rows[0].count, 10);
+      const totalPages = Math.ceil(totalCount / limit) || 1;
+
+      const result = await pool.query(
+        `
+        SELECT
+          a.id,
+          a.action,
+          a.entity,
+          a.entity_id,
+          COALESCE(NULLIF(a.performed_by, 'SYSTEM'), u.name, u.username, 'SYSTEM') AS performed_by,
+          u.name AS performer_name,
+          u.username AS performer_username,
+          a.user_id,
+          a.metadata,
+          a.created_at
+        FROM audit_logs a
+        LEFT JOIN users u ON a.user_id = u.id
+        ORDER BY a.created_at DESC
+        LIMIT $1 OFFSET $2
+        `,
+        [limit, offset]
+      );
+
+      res.json({
+        logs: result.rows,
+        pagination: {
+          totalCount,
+          totalPages,
+          currentPage: page,
+          limit,
+        },
+      });
     } catch (err) {
       console.error("AUDIT LOGS ERROR 👉", err.message);
       res.status(500).json({ error: "Failed to load audit logs" });

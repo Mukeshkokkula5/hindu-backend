@@ -2,7 +2,9 @@ const express = require("express");
 const pool = require("../db");
 const verifyToken = require("../middleware/verifyToken");
 const checkRole = require("../middleware/checkRole");
+const bcrypt = require("bcryptjs");
 const sendMail = require("../utils/sendMail");
+const { addMemberTemplate } = require("../utils/emailTemplates");
 
 const router = express.Router();
 
@@ -60,43 +62,51 @@ router.post(
         password,
       } = req.body;
 
-    const result = await pool.query(
-  `
-  INSERT INTO users
-  (member_id, name, username, personal_email, phone, address, role, password, active)
-  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true)
-  RETURNING member_id, username
-  `,
-  [
-    member_id,
-    name,
-    association_id,
-    personal_email,
-    phone,
-    address,
-    role,
-    password,
-  ]
-);
+      const rawPassword = password || Math.random().toString(36).slice(-8);
+      const hashedPassword = await bcrypt.hash(rawPassword, 10);
 
-const savedMemberId = result.rows[0].member_id;
-const savedAssociationId = result.rows[0].username;
+      const result = await pool.query(
+        `
+        INSERT INTO users
+        (member_id, name, username, personal_email, phone, address, role, password, is_first_login, active)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,true)
+        RETURNING member_id, username
+        `,
+        [
+          member_id,
+          name,
+          association_id,
+          personal_email,
+          phone,
+          address,
+          role || "MEMBER",
+          hashedPassword,
+        ]
+      );
 
-      // Optional welcome mail
+      const savedMemberId = result.rows[0].member_id;
+      const savedAssociationId = result.rows[0].username;
+
+      // Welcome mail with full login credentials
       if (personal_email) {
         await sendMail(
           personal_email,
-          "Welcome to Association System",
-          `
-          <h3>Hello ${name}</h3>
-          <p>Your Association ID:</p>
-          <b>${association_id}</b>
-          <p>Please login and change your password.</p>
-          `
+          "Welcome to HSY Association 🎉",
+          addMemberTemplate({
+            name,
+            username: savedAssociationId || association_id,
+            memberId: savedMemberId || member_id,
+            password: rawPassword,
+          })
         );
       }
 
-      res.status(201).json({ message: "Member added successfully" });
+      res.status(201).json({
+        message: "Member added successfully",
+        member_id: savedMemberId,
+        username: savedAssociationId,
+        tempPassword: rawPassword,
+      });
     } catch (err) {
       console.error("ADD MEMBER ERROR 👉", err.message);
       res.status(500).json({ error: "Failed to add member" });

@@ -154,61 +154,100 @@ router.get("/me", verifyToken, async (req, res) => {
 ========================= */
 router.post("/forgot-password", async (req, res) => {
   try {
-    const { username } = req.body;
+    const { username, email } = req.body;
+    const identifier = (username || email || "").trim();
 
-    if (!username) {
-      return res.status(400).json({ error: "Association ID required" });
+    if (!identifier) {
+      return res.status(400).json({ error: "Username or registered email is required" });
     }
 
     const userResult = await pool.query(
-      "SELECT id, name, personal_email FROM users WHERE username=$1",
-      [username]
+      `SELECT id, name, username, personal_email 
+       FROM users 
+       WHERE username=$1 OR username=$1 || '@hsy.org' OR personal_email=$1`,
+      [identifier]
     );
 
     if (!userResult.rowCount) {
-      return res.status(404).json({ error: "User not found" });
+      return res.status(404).json({ error: "No account found with this username/email" });
     }
 
     const user = userResult.rows[0];
     if (!user.personal_email) {
-      return res.status(400).json({ error: "No email registered" });
+      return res.status(400).json({ error: "No personal email registered for this account. Please contact Super Admin." });
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const otpHash = await bcrypt.hash(otp, 10);
 
+    // Invalidate previous unused OTPs for this user
+    await pool.query(
+      "UPDATE password_resets SET used=true WHERE user_id=$1 AND used=false",
+      [user.id]
+    );
+
     await pool.query(
       `INSERT INTO password_resets (user_id, otp_hash, expires_at)
-       VALUES ($1,$2,NOW() + INTERVAL '10 minutes')`,
+       VALUES ($1, $2, NOW() + INTERVAL '10 minutes')`,
       [user.id, otpHash]
     );
 
-    await sendMail(
+    // Mask email for privacy
+    const [userPart, domain] = user.personal_email.split("@");
+    const maskedEmail =
+      userPart.length > 2
+        ? `${userPart[0]}***${userPart[userPart.length - 1]}@${domain}`
+        : `${userPart[0]}***@${domain}`;
+
+    console.log(`🔑 [PASSWORD RESET OTP] For ${user.username} (${user.personal_email}): ${otp}`);
+
+    const mailSent = await sendMail(
       user.personal_email,
       "Password Reset OTP – HSY Association",
       forgotPasswordTemplate({ name: user.name, otp })
     );
 
-    res.json({ message: "OTP sent to registered email" });
+    if (!mailSent) {
+      console.warn("⚠️ Email delivery failed (check RESEND_API_KEY). OTP is logged above for local testing.");
+      if (process.env.NODE_ENV === "production") {
+        return res.status(500).json({
+          error: "Failed to deliver reset email. Please contact the administrator.",
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: mailSent
+        ? `OTP sent to your registered email (${maskedEmail})`
+        : `Email delivery failed (Invalid API key), but OTP generated for testing: ${otp}`,
+      username: user.username,
+      maskedEmail,
+      mailSent: !!mailSent,
+      ...(process.env.NODE_ENV !== "production" ? { devOtp: otp } : {}),
+    });
   } catch (err) {
     console.error("FORGOT PASSWORD ERROR 👉", err);
-    res.status(500).json({ error: "Server error" });
+    res.status(500).json({ error: "Server error while generating OTP" });
   }
 });
+
 /* =========================
    🔐 VERIFY OTP (FORGOT PASSWORD)
 ========================= */
 router.post("/verify-otp", async (req, res) => {
   try {
-    const { username, otp } = req.body;
+    const { username, email, otp } = req.body;
+    const identifier = (username || email || "").trim();
 
-    if (!username || !otp) {
-      return res.status(400).json({ error: "Association ID and OTP required" });
+    if (!identifier || !otp) {
+      return res.status(400).json({ error: "Username and OTP are required" });
     }
 
     const userResult = await pool.query(
-      "SELECT id FROM users WHERE username=$1",
-      [username]
+      `SELECT id, username FROM users 
+       WHERE username=$1 OR username=$1 || '@hsy.org' OR personal_email=$1`,
+      [identifier]
     );
 
     if (!userResult.rowCount) {
@@ -220,79 +259,126 @@ router.post("/verify-otp", async (req, res) => {
     const otpResult = await pool.query(
       `SELECT otp_hash, expires_at
        FROM password_resets
-       WHERE user_id=$1 AND used=false
+       WHERE user_id=$1 AND used=false AND expires_at > NOW()
        ORDER BY created_at DESC
        LIMIT 1`,
       [userId]
     );
 
     if (!otpResult.rowCount) {
-      return res.status(400).json({ error: "OTP not found or expired" });
+      return res.status(400).json({ error: "No active OTP found or OTP has expired. Please request a new OTP." });
     }
 
     const { otp_hash, expires_at } = otpResult.rows[0];
 
-    if (new Date() > expires_at) {
-      return res.status(400).json({ error: "OTP expired" });
+    if (new Date() > new Date(expires_at)) {
+      return res.status(400).json({ error: "OTP has expired. Please request a new OTP." });
     }
 
-    const isValid = await bcrypt.compare(otp, otp_hash);
+    const isValid = await bcrypt.compare(otp.trim(), otp_hash);
 
     if (!isValid) {
-      return res.status(400).json({ error: "Invalid OTP" });
+      return res.status(400).json({ error: "Invalid OTP. Please check and try again." });
     }
 
     res.json({
       success: true,
       message: "OTP verified successfully",
+      username: userResult.rows[0].username,
     });
   } catch (err) {
     console.error("VERIFY OTP ERROR 👉", err);
-    res.status(500).json({ error: "Server error" });
+    res.status(500).json({ error: "Server error while verifying OTP" });
   }
 });
+
 /* =========================
    🔐 RESET PASSWORD
 ========================= */
 router.post("/reset-password", async (req, res) => {
   try {
-    const { username, newPassword } = req.body;
+    const { username, email, otp, newPassword } = req.body;
+    const identifier = (username || email || "").trim();
 
-    if (!username || !newPassword) {
-      return res.status(400).json({ error: "All fields required" });
+    if (!identifier || !newPassword) {
+      return res.status(400).json({ error: "Username and new password are required" });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: "Password must be at least 6 characters long" });
     }
 
     const userResult = await pool.query(
-      "SELECT id, name, personal_email FROM users WHERE username=$1",
-      [username]
+      `SELECT id, name, username, personal_email FROM users 
+       WHERE username=$1 OR username=$1 || '@hsy.org' OR personal_email=$1`,
+      [identifier]
     );
 
     if (!userResult.rowCount) {
       return res.status(404).json({ error: "User not found" });
     }
 
+    const user = userResult.rows[0];
+
+    // If OTP is provided, verify it
+    if (otp) {
+      const otpResult = await pool.query(
+        `SELECT otp_hash, expires_at
+         FROM password_resets
+         WHERE user_id=$1 AND used=false AND expires_at > NOW()
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [user.id]
+      );
+
+      if (!otpResult.rowCount) {
+        return res.status(400).json({ error: "No active OTP found or OTP has expired. Please request a new OTP." });
+      }
+
+      const { otp_hash, expires_at } = otpResult.rows[0];
+      if (new Date() > new Date(expires_at)) {
+        return res.status(400).json({ error: "OTP has expired. Please request a new OTP." });
+      }
+
+      const isValid = await bcrypt.compare(otp.trim(), otp_hash);
+      if (!isValid) {
+        return res.status(400).json({ error: "Invalid OTP" });
+      }
+    }
+
     const hashed = await bcrypt.hash(newPassword, 10);
 
     await pool.query(
       "UPDATE users SET password=$1, is_first_login=false WHERE id=$2",
-      [hashed, userResult.rows[0].id]
+      [hashed, user.id]
     );
 
     await pool.query(
       "UPDATE password_resets SET used=true WHERE user_id=$1",
-      [userResult.rows[0].id]
+      [user.id]
     );
 
-    await sendMail(
-      userResult.rows[0].personal_email,
-      "Password Reset Successful – HSY Association",
-      passwordResetSuccessTemplate({ name: userResult.rows[0].name })
-    );
+    if (user.personal_email) {
+      await sendMail(
+        user.personal_email,
+        "Password Reset Successful – HSY Association",
+        passwordResetSuccessTemplate({ name: user.name })
+      );
+    }
 
-    res.json({ message: "Password reset successful" });
+    try {
+      await logAudit("RESET_PASSWORD", "USER", user.id, user.id);
+    } catch (auditErr) {
+      console.warn("Audit log warning:", auditErr.message);
+    }
+
+    res.json({
+      success: true,
+      message: "Password reset successfully! You can now log in with your new password.",
+    });
   } catch (err) {
     console.error("RESET PASSWORD ERROR 👉", err);
-    res.status(500).json({ error: "Server error" });
+    res.status(500).json({ error: "Server error while resetting password" });
   }
 });
 
