@@ -11,10 +11,19 @@ const logAudit = require("../utils/auditLogger");
 const isYearClosed = require("../utils/isYearClosed");
 
 // Ensure upload directory for bills
-const uploadDir = path.join(__dirname, "..", "uploads", "bills");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+const isProd = process.env.VERCEL || process.env.NODE_ENV === "production";
+const uploadDir = isProd ? "/tmp" : path.join(__dirname, "..", "uploads", "bills");
+
+if (!isProd) {
+  try {
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+  } catch (e) {
+    console.warn("Expenses upload dir init notice:", e.message);
+  }
 }
+
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {

@@ -60,8 +60,14 @@ async function generateResolutionPDF(resolutionId) {
   /* =========================
      FILE SETUP
   ========================= */
-  const dir = path.join(__dirname, "../uploads/resolutions");
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const isProd = process.env.VERCEL || process.env.NODE_ENV === "production";
+  const dir = isProd ? "/tmp" : path.join(__dirname, "../uploads/resolutions");
+  if (!isProd) {
+    try {
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    } catch (e) {}
+  }
+
 
   const filePath = path.join(dir, `resolution_${resolutionId}.pdf`);
   const doc = new PDFDocument({ size: "A4", margin: 40 });

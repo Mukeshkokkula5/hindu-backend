@@ -8,10 +8,19 @@ const verifyToken = require("../middleware/verifyToken");
 const router = express.Router();
 
 // Ensure upload directory exists
-const uploadDir = path.join(__dirname, "../uploads");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+const isProd = process.env.VERCEL || process.env.NODE_ENV === "production";
+const uploadDir = isProd ? "/tmp" : path.join(__dirname, "../uploads");
+
+if (!isProd) {
+  try {
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+  } catch (e) {
+    console.warn("Community upload dir init notice:", e.message);
+  }
 }
+
 
 // Multer Storage for Community Posts & Stories
 const storage = multer.diskStorage({

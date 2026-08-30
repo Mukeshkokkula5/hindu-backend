@@ -8,11 +8,16 @@ const path = require("path");
 const fs = require("fs");
 
 /* ================= ENSURE UPLOAD DIR ================= */
-const isProd = process.env.NODE_ENV === "production";
+const isProd = process.env.VERCEL || process.env.NODE_ENV === "production";
 const uploadDir = isProd ? "/tmp" : path.join("uploads", "logo");
-if (!isProd && !fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+if (!isProd) {
+  try {
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+  } catch (e) {}
 }
+
 
 /* ================= MULTER CONFIG ================= */
 const storage = multer.diskStorage({
@@ -160,10 +165,17 @@ router.put(
 );
 
 /* ================= DIGITAL SIGNATURES UPLOAD ================= */
-const signatureUploadDir = path.join(__dirname, "..", "uploads", "signatures");
-if (!fs.existsSync(signatureUploadDir)) {
-  fs.mkdirSync(signatureUploadDir, { recursive: true });
+const signatureUploadDir = isProd ? "/tmp" : path.join(__dirname, "..", "uploads", "signatures");
+if (!isProd) {
+  try {
+    if (!fs.existsSync(signatureUploadDir)) {
+      fs.mkdirSync(signatureUploadDir, { recursive: true });
+    }
+  } catch (e) {
+    console.warn("Signatures upload dir init notice:", e.message);
+  }
 }
+
 
 const signatureStorage = multer.diskStorage({
   destination: (req, file, cb) => {

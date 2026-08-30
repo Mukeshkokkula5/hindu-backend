@@ -35,10 +35,14 @@ async function generateMinutesPDF(meetingId) {
     WHERE meeting_id = $1
   `, [meetingId]);
 
-  const minutesNo = `MIN/HSY/${new Date().getFullYear()}/${String(meetingId).padStart(4,"0")}`;
+  const isProd = process.env.VERCEL || process.env.NODE_ENV === "production";
+  const dir = isProd ? "/tmp" : path.join(__dirname, "../uploads/minutes");
+  if (!isProd) {
+    try {
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    } catch (e) {}
+  }
 
-  const dir = path.join(__dirname, "../uploads/minutes");
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
   const filePath = path.join(dir, `minutes_${meetingId}.pdf`);
   const doc = new PDFDocument({ size: "A4", margin: 40 });

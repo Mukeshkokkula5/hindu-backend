@@ -5,12 +5,17 @@ const fs = require("fs");
 /* =========================
    ENSURE UPLOAD DIRECTORY
 ========================= */
-const isProd = process.env.NODE_ENV === "production";
+const isProd = process.env.VERCEL || process.env.NODE_ENV === "production";
 const uploadDir = isProd ? "/tmp" : "uploads/profile-dp";
 
-if (!isProd && !fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+if (!isProd) {
+  try {
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+  } catch (e) {}
 }
+
 
 /* =========================
    STORAGE CONFIG
