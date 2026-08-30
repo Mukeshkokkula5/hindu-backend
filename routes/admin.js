@@ -26,11 +26,12 @@ const ROLES = {
   TREASURER: "TREASURER",
   EC_MEMBER: "EC_MEMBER",
   MEMBER: "MEMBER",
+  VOLUNTEER: "VOLUNTEER",
 };
 
 const ALL_ROLES = Object.values(ROLES);
-const ADMIN_ROLES = [ROLES.SUPER_ADMIN, ROLES.PRESIDENT];
-const DASHBOARD_ROLES = [
+const ADMIN_WRITE_ROLES = [ROLES.SUPER_ADMIN, ROLES.PRESIDENT];
+const VIEW_ALL_ROLES = [
   ROLES.SUPER_ADMIN,
   ROLES.PRESIDENT,
   ROLES.VICE_PRESIDENT,
@@ -92,7 +93,7 @@ async function generateUsername(name) {
 router.get(
   "/members",
   verifyToken,
-  checkRole(...ADMIN_ROLES),
+  checkRole(...VIEW_ALL_ROLES),
   async (req, res) => {
     try {
       const { rows } = await pool.query(`
@@ -125,7 +126,7 @@ router.get(
 router.post(
   "/add-member",
   verifyToken,
-  checkRole(...ADMIN_ROLES),
+  checkRole(...ADMIN_WRITE_ROLES),
   async (req, res) => {
     const client = await pool.connect();
     try {
@@ -200,7 +201,7 @@ router.post(
 router.put(
   "/edit-member/:id",
   verifyToken,
-  checkRole(ROLES.SUPER_ADMIN, ROLES.PRESIDENT),
+  checkRole(...ADMIN_WRITE_ROLES),
   async (req, res) => {
     try {
       const { name, personal_email, phone, address, role, active } = req.body;
@@ -247,9 +248,9 @@ router.put(
    🚫 BLOCK / UNBLOCK MEMBER
 ===================================================== */
 router.patch(
-  "/members/:id/status",
+  "/members/:id/toggle-active",
   verifyToken,
-  checkRole(...ADMIN_ROLES),
+  checkRole(...ADMIN_WRITE_ROLES),
   async (req, res) => {
     try {
       const { active } = req.body;
@@ -283,9 +284,9 @@ router.patch(
    🔁 RESEND LOGIN
 ===================================================== */
 router.post(
-  "/members/:id/resend-login",
+  "/members/:id/reset-password",
   verifyToken,
-  checkRole(...ADMIN_ROLES),
+  checkRole(...ADMIN_WRITE_ROLES),
   async (req, res) => {
     try {
       const user = await pool.query(
@@ -332,7 +333,7 @@ router.post(
 router.delete(
   "/members/:id",
   verifyToken,
-  checkRole(ROLES.SUPER_ADMIN),
+  checkRole(...ADMIN_WRITE_ROLES),
   async (req, res) => {
     try {
       await pool.query("DELETE FROM users WHERE id=$1", [req.params.id]);
@@ -354,7 +355,7 @@ router.delete(
 router.get(
   "/audit-logs",
   verifyToken,
-  checkRole("SUPER_ADMIN"),
+  checkRole(...VIEW_ALL_ROLES),
   async (req, res) => {
     try {
       const page = Math.max(1, parseInt(req.query.page, 10) || 1);

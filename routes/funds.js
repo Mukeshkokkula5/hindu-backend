@@ -14,7 +14,7 @@ const isYearClosed = require("../utils/isYearClosed");
 router.get(
   "/",
   verifyToken,
-  checkRole("SUPER_ADMIN", "PRESIDENT", "TREASURER"),
+  checkRole("SUPER_ADMIN", "PRESIDENT", "VICE_PRESIDENT", "GENERAL_SECRETARY", "TREASURER", "EC_MEMBER"),
   async (req, res) => {
     try {
       const result = await pool.query(`

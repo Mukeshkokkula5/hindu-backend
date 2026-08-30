@@ -2,15 +2,36 @@ const logAudit = require("../utils/auditLogger");
 const express = require("express");
 const bcrypt = require("bcryptjs"); // ✅ ONLY bcrypt
 const jwt = require("jsonwebtoken");
+const rateLimit = require("express-rate-limit");
 const pool = require("../db");
 const verifyToken = require("../middleware/verifyToken");
 const sendMail = require("../utils/sendMail");
 const {
   forgotPasswordTemplate,
   passwordResetSuccessTemplate,
+  changePasswordOtpTemplate,
 } = require("../utils/emailTemplates");
 
 const router = express.Router();
+
+/* =========================
+   🛡️ AUTH BRUTE-FORCE RATE LIMITER
+========================= */
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 30, // 30 attempts per 15 minutes per IP
+  message: {
+    error: "Too many login/OTP attempts. Please try again after 15 minutes.",
+  },
+  skipSuccessfulRequests: true,
+  skip: (req) =>
+    req.ip === "127.0.0.1" ||
+    req.ip === "::1" ||
+    req.ip === "::ffff:127.0.0.1" ||
+    process.env.NODE_ENV === "development",
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 /* =========================
    🔐 REGISTER (SUPER ADMIN – RUN ONCE)
@@ -55,7 +76,7 @@ router.post("/register", async (req, res) => {
 /* =========================
    🔑 LOGIN (USERNAME / EMAIL)
 ========================= */
-router.post("/login", async (req, res) => {
+router.post("/login", authLimiter, async (req, res) => {
   try {
     const { email, username, password } = req.body;
     const loginId = email || username;
@@ -69,8 +90,12 @@ router.post("/login", async (req, res) => {
     const result = await pool.query(
       `SELECT id,name,username,password,role,is_first_login,active
        FROM users
-       WHERE username=$1 OR username=$1 || '@hsy.org' OR personal_email=$1`,
-      [loginId]
+       WHERE LOWER(username) = LOWER($1)
+          OR LOWER(username) = LOWER($1 || '@hsy.org')
+          OR LOWER(username) = LOWER(REPLACE($1, '@hsy.org', ''))
+          OR LOWER(COALESCE(personal_email, '')) = LOWER($1)
+       LIMIT 1`,
+      [loginId.trim()]
     );
 
     if (!result.rowCount) {
@@ -132,7 +157,10 @@ router.get("/me", verifyToken, async (req, res) => {
         address,
         role,
         active,
-        is_first_login
+        is_first_login,
+        COALESCE(blood_group, 'B+') AS blood_group,
+        COALESCE(photo_url, '/images/leader-president.png') AS photo_url,
+        created_at
       FROM users
       WHERE id = $1
       `,
@@ -149,10 +177,39 @@ router.get("/me", verifyToken, async (req, res) => {
     res.status(500).json({ error: "Failed to fetch user" });
   }
 });
+
+/* =========================
+   👤 UPDATE MY PROFILE (PHOTO / BLOOD GROUP / PHONE)
+========================= */
+router.put("/profile", verifyToken, async (req, res) => {
+  try {
+    const { name, phone, address, blood_group, photo_url, personal_email } = req.body;
+    const result = await pool.query(
+      `
+      UPDATE users
+      SET name = COALESCE($1, name),
+          phone = COALESCE($2, phone),
+          address = COALESCE($3, address),
+          blood_group = COALESCE($4, blood_group),
+          photo_url = COALESCE($5, photo_url),
+          personal_email = COALESCE($6, personal_email)
+      WHERE id = $7
+      RETURNING id, member_id, name, username, personal_email, phone, address, role, blood_group, photo_url, created_at
+      `,
+      [name, phone, address, blood_group, photo_url, personal_email, req.user.id]
+    );
+
+    res.json({ success: true, message: "Profile updated successfully", user: result.rows[0] });
+  } catch (err) {
+    console.error("UPDATE PROFILE ERROR 👉", err.message);
+    res.status(500).json({ error: "Failed to update profile" });
+  }
+});
+
 /* =========================
    🔐 FORGOT PASSWORD – SEND OTP
 ========================= */
-router.post("/forgot-password", async (req, res) => {
+router.post("/forgot-password", authLimiter, async (req, res) => {
   try {
     const { username, email } = req.body;
     const identifier = (username || email || "").trim();
@@ -235,7 +292,7 @@ router.post("/forgot-password", async (req, res) => {
 /* =========================
    🔐 VERIFY OTP (FORGOT PASSWORD)
 ========================= */
-router.post("/verify-otp", async (req, res) => {
+router.post("/verify-otp", authLimiter, async (req, res) => {
   try {
     const { username, email, otp } = req.body;
     const identifier = (username || email || "").trim();
@@ -295,13 +352,13 @@ router.post("/verify-otp", async (req, res) => {
 /* =========================
    🔐 RESET PASSWORD
 ========================= */
-router.post("/reset-password", async (req, res) => {
+router.post("/reset-password", authLimiter, async (req, res) => {
   try {
     const { username, email, otp, newPassword } = req.body;
     const identifier = (username || email || "").trim();
 
-    if (!identifier || !newPassword) {
-      return res.status(400).json({ error: "Username and new password are required" });
+    if (!identifier || !otp || !newPassword) {
+      return res.status(400).json({ error: "Username, OTP and new password are required" });
     }
 
     if (newPassword.length < 6) {
@@ -320,30 +377,28 @@ router.post("/reset-password", async (req, res) => {
 
     const user = userResult.rows[0];
 
-    // If OTP is provided, verify it
-    if (otp) {
-      const otpResult = await pool.query(
-        `SELECT otp_hash, expires_at
-         FROM password_resets
-         WHERE user_id=$1 AND used=false AND expires_at > NOW()
-         ORDER BY created_at DESC
-         LIMIT 1`,
-        [user.id]
-      );
+    // Strict OTP verification required for password reset
+    const otpResult = await pool.query(
+      `SELECT otp_hash, expires_at
+       FROM password_resets
+       WHERE user_id=$1 AND used=false AND expires_at > NOW()
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [user.id]
+    );
 
-      if (!otpResult.rowCount) {
-        return res.status(400).json({ error: "No active OTP found or OTP has expired. Please request a new OTP." });
-      }
+    if (!otpResult.rowCount) {
+      return res.status(400).json({ error: "No active OTP found or OTP has expired. Please request a new OTP." });
+    }
 
-      const { otp_hash, expires_at } = otpResult.rows[0];
-      if (new Date() > new Date(expires_at)) {
-        return res.status(400).json({ error: "OTP has expired. Please request a new OTP." });
-      }
+    const { otp_hash, expires_at } = otpResult.rows[0];
+    if (new Date() > new Date(expires_at)) {
+      return res.status(400).json({ error: "OTP has expired. Please request a new OTP." });
+    }
 
-      const isValid = await bcrypt.compare(otp.trim(), otp_hash);
-      if (!isValid) {
-        return res.status(400).json({ error: "Invalid OTP" });
-      }
+    const isValid = await bcrypt.compare(otp.trim(), otp_hash);
+    if (!isValid) {
+      return res.status(400).json({ error: "Invalid OTP. Please check and try again." });
     }
 
     const hashed = await bcrypt.hash(newPassword, 10);
@@ -390,44 +445,180 @@ router.get("/verify", verifyToken, (req, res) => {
 });
 
 /* =========================
-   🔁 CHANGE PASSWORD (LOGGED IN)
+   🔐 SEND CHANGE PASSWORD OTP (LOGGED IN)
 ========================= */
-router.post("/change-password", verifyToken, async (req, res) => {
+router.post("/send-change-password-otp", verifyToken, authLimiter, async (req, res) => {
   try {
-    const { oldPassword, newPassword } = req.body;
-
-    if (!oldPassword || !newPassword) {
-      return res.status(400).json({ error: "All fields required" });
-    }
-
     const userResult = await pool.query(
-      "SELECT password FROM users WHERE id=$1",
+      "SELECT id, name, username, personal_email FROM users WHERE id=$1",
       [req.user.id]
     );
 
-    const match = await bcrypt.compare(
-      oldPassword,
-      userResult.rows[0].password
-    );
-
-    if (!match) {
-      return res.status(401).json({ error: "Old password incorrect" });
+    if (!userResult.rowCount) {
+      return res.status(404).json({ error: "User not found" });
     }
 
+    const user = userResult.rows[0];
+    if (!user.personal_email) {
+      return res.status(400).json({
+        error: "No registered personal email found for your account. Please update your email in profile settings first.",
+      });
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpHash = await bcrypt.hash(otp, 10);
+
+    // Invalidate previous active OTPs for this user
+    await pool.query(
+      "UPDATE password_resets SET used=true WHERE user_id=$1 AND used=false",
+      [user.id]
+    );
+
+    await pool.query(
+      `INSERT INTO password_resets (user_id, otp_hash, expires_at)
+       VALUES ($1, $2, NOW() + INTERVAL '10 minutes')`,
+      [user.id, otpHash]
+    );
+
+    // Mask email for privacy
+    const [userPart, domain] = user.personal_email.split("@");
+    const maskedEmail =
+      userPart.length > 2
+        ? `${userPart[0]}***${userPart[userPart.length - 1]}@${domain}`
+        : `${userPart[0]}***@${domain}`;
+
+    console.log(`🔑 [CHANGE PASSWORD OTP] For ${user.username} (${user.personal_email}): ${otp}`);
+
+    const mailSent = await sendMail(
+      user.personal_email,
+      "Change Password Verification OTP – HSY Association",
+      changePasswordOtpTemplate({ name: user.name, otp })
+    );
+
+    if (!mailSent) {
+      console.warn("⚠️ Email delivery failed (check RESEND_API_KEY). OTP is logged above for local testing.");
+      if (process.env.NODE_ENV === "production") {
+        return res.status(500).json({
+          error: "Failed to deliver OTP email. Please try again or contact administrator.",
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: mailSent
+        ? `Verification OTP sent to your registered email (${maskedEmail})`
+        : `OTP generated for testing: ${otp}`,
+      maskedEmail,
+      mailSent: !!mailSent,
+      ...(process.env.NODE_ENV !== "production" ? { devOtp: otp } : {}),
+    });
+  } catch (err) {
+    console.error("SEND CHANGE PASSWORD OTP ERROR 👉", err);
+    res.status(500).json({ error: "Server error while generating OTP" });
+  }
+});
+
+/* =========================
+   🔁 CHANGE PASSWORD (LOGGED IN WITH OTP)
+========================= */
+router.post("/change-password", verifyToken, authLimiter, async (req, res) => {
+  try {
+    const { oldPassword, newPassword, otp } = req.body;
+
+    if (!oldPassword || !newPassword || !otp) {
+      return res.status(400).json({ error: "Current password, new password, and OTP are required" });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: "New password must be at least 6 characters long" });
+    }
+
+    if (oldPassword === newPassword) {
+      return res.status(400).json({ error: "New password cannot be the same as your current password" });
+    }
+
+    const userResult = await pool.query(
+      "SELECT id, name, username, personal_email, password FROM users WHERE id=$1",
+      [req.user.id]
+    );
+
+    if (!userResult.rowCount) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const user = userResult.rows[0];
+
+    // 1. Verify Old Password
+    const isOldPassMatch = await bcrypt.compare(
+      oldPassword,
+      user.password
+    );
+
+    if (!isOldPassMatch) {
+      return res.status(401).json({ error: "Current password is incorrect" });
+    }
+
+    // 2. Verify OTP
+    const otpResult = await pool.query(
+      `SELECT otp_hash, expires_at
+       FROM password_resets
+       WHERE user_id=$1 AND used=false AND expires_at > NOW()
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [user.id]
+    );
+
+    if (!otpResult.rowCount) {
+      return res.status(400).json({ error: "No active OTP found or OTP has expired. Please click 'Send OTP' again." });
+    }
+
+    const { otp_hash, expires_at } = otpResult.rows[0];
+    if (new Date() > new Date(expires_at)) {
+      return res.status(400).json({ error: "OTP has expired. Please request a fresh OTP." });
+    }
+
+    const isValidOtp = await bcrypt.compare(otp.trim(), otp_hash);
+    if (!isValidOtp) {
+      return res.status(400).json({ error: "Invalid OTP. Please check and try again." });
+    }
+
+    // 3. Update Password
     const hashed = await bcrypt.hash(newPassword, 10);
 
     await pool.query(
       "UPDATE users SET password=$1, is_first_login=false WHERE id=$2",
-      [hashed, req.user.id]
+      [hashed, user.id]
     );
 
+    // 4. Mark OTP as used
+    await pool.query(
+      "UPDATE password_resets SET used=true WHERE user_id=$1",
+      [user.id]
+    );
+
+    // 5. Send Success Notification Email
+    if (user.personal_email) {
+      await sendMail(
+        user.personal_email,
+        "Password Changed Successfully – HSY Association",
+        passwordResetSuccessTemplate({ name: user.name })
+      );
+    }
+
+    try {
+      await logAudit("CHANGE_PASSWORD", "USER", user.id, user.id);
+    } catch (auditErr) {
+      console.warn("Audit log warning:", auditErr.message);
+    }
+
     res.json({
-      message: "Password changed successfully. Please login again.",
-      forceLogout: true,
+      success: true,
+      message: "Password changed successfully! 🔐",
     });
   } catch (err) {
     console.error("CHANGE PASSWORD ERROR 👉", err);
-    res.status(500).json({ error: "Server error" });
+    res.status(500).json({ error: "Server error while changing password" });
   }
 });
 

@@ -65,77 +65,204 @@ router.get(
   }
 );
 
-/* ================= ADMIN UPDATE (CMS SAVE) ================= */
 router.put(
   "/admin",
   verifyToken,
-  checkRole("SUPER_ADMIN"),
+  checkRole("SUPER_ADMIN", "PRESIDENT"),
   async (req, res) => {
     try {
       const s = req.body;
 
-      await pool.query(
-        `
-        INSERT INTO association_settings (
-          association_name,
-          hero_title, hero_subtitle,
-          hero_title_te, hero_subtitle_te,
-          primary_color, secondary_color, background_gradient,
-          about_text, about_text_te,
-          mission_text, mission_text_te,
-          vision_text, vision_text_te,
-          show_about, show_mission, show_activities,
-          show_values, show_transparency,
-          logo_url
-        )
-        VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-          $11,$12,$13,$14,$15,$16,$17,$18,$19,$20
-        )
-        `,
-        [
-          s.association_name,
-          s.hero_title,
-          s.hero_subtitle,
-          s.hero_title_te,
-          s.hero_subtitle_te,
-          s.primary_color,
-          s.secondary_color,
-          s.background_gradient,
-          s.about_text,
-          s.about_text_te,
-          s.mission_text,
-          s.mission_text_te,
-          s.vision_text,
-          s.vision_text_te,
-          s.show_about,
-          s.show_mission,
-          s.show_activities,
-          s.show_values,
-          s.show_transparency,
-          s.logo_url,
-        ]
+      const existing = await pool.query(
+        "SELECT id FROM association_settings ORDER BY id DESC LIMIT 1"
       );
 
-      res.json({ success: true });
+      let result;
+      if (existing.rows.length > 0) {
+        result = await pool.query(
+          `
+          UPDATE association_settings SET
+            association_name = COALESCE($1, association_name),
+            hero_title = COALESCE($2, hero_title),
+            hero_subtitle = COALESCE($3, hero_subtitle),
+            facebook_url = COALESCE($4, facebook_url),
+            instagram_url = COALESCE($5, instagram_url),
+            youtube_url = COALESCE($6, youtube_url),
+            whatsapp_url = COALESCE($7, whatsapp_url),
+            bank_name = COALESCE($8, bank_name),
+            account_name = COALESCE($9, account_name),
+            account_no = COALESCE($10, account_no),
+            ifsc_code = COALESCE($11, ifsc_code),
+            branch_name = COALESCE($12, branch_name),
+            account_type = COALESCE($13, account_type),
+            upi_id = COALESCE($14, upi_id),
+            regd_no = COALESCE($15, regd_no)
+          WHERE id = $16
+          RETURNING *
+          `,
+          [
+            s.association_name || null,
+            s.hero_title || null,
+            s.hero_subtitle || null,
+            s.facebook_url || null,
+            s.instagram_url || null,
+            s.youtube_url || null,
+            s.whatsapp_url || null,
+            s.bank_name || null,
+            s.account_name || null,
+            s.account_no || null,
+            s.ifsc_code || null,
+            s.branch_name || null,
+            s.account_type || null,
+            s.upi_id || null,
+            s.regd_no || null,
+            existing.rows[0].id,
+          ]
+        );
+      } else {
+        result = await pool.query(
+          `
+          INSERT INTO association_settings (
+            association_name,
+            hero_title, hero_subtitle,
+            facebook_url, instagram_url, youtube_url, whatsapp_url,
+            bank_name, account_name, account_no, ifsc_code, branch_name, account_type, upi_id, regd_no
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+          RETURNING *
+          `,
+          [
+            s.association_name || "Hindu Swaraj Youth Welfare Association",
+            s.hero_title || "",
+            s.hero_subtitle || "",
+            s.facebook_url || "https://facebook.com",
+            s.instagram_url || "https://instagram.com",
+            s.youtube_url || "https://youtube.com",
+            s.whatsapp_url || "https://wa.me/918499878425",
+            s.bank_name || "Union Bank of India",
+            s.account_name || "HINDU SWARAJ YOUTH WELFARE ASSOCIATION",
+            s.account_no || "084910100054321",
+            s.ifsc_code || "UBIN0808491",
+            s.branch_name || "Jagtial Main Branch",
+            s.account_type || "Current Account",
+            s.upi_id || "8499878425@ybl",
+            s.regd_no || "Regd. No: 784/2025 (Govt. of Telangana)",
+          ]
+        );
+      }
+
+      res.json({ success: true, message: "Association settings & Bank details saved successfully!", data: result.rows[0] });
     } catch (err) {
       console.error("UPDATE SETTINGS ERROR 👉", err.message);
-      res.status(500).json({ error: "Failed to save settings" });
+      res.status(500).json({ error: "Failed to save settings: " + err.message });
     }
   }
 );
 
-/* ================= LOGO UPLOAD ================= */
+/* ================= DIGITAL SIGNATURES UPLOAD ================= */
+const signatureUploadDir = path.join(__dirname, "..", "uploads", "signatures");
+if (!fs.existsSync(signatureUploadDir)) {
+  fs.mkdirSync(signatureUploadDir, { recursive: true });
+}
+
+const signatureStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, signatureUploadDir);
+  },
+  filename: (req, file, cb) => {
+    const rolePrefix = (req.body.role || "sign").toLowerCase().replace(/[^a-z0-9]/g, "_");
+    cb(null, `${rolePrefix}_${Date.now()}${path.extname(file.originalname).toLowerCase()}`);
+  },
+});
+
+const uploadSignature = multer({
+  storage: signatureStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: (_, file, cb) => {
+    const allowed = /png|jpg|jpeg|webp|svg/;
+    const ext = allowed.test(path.extname(file.originalname).toLowerCase());
+    if (!ext) return cb(new Error("Only image files (.png, .jpg, .jpeg, .webp, .svg) are allowed"));
+    cb(null, true);
+  },
+});
+
 router.post(
-  "/logo",
+  "/signatures/upload",
   verifyToken,
-  checkRole("SUPER_ADMIN"),
-  upload.single("logo"),
+  checkRole("SUPER_ADMIN", "PRESIDENT", "VICE_PRESIDENT", "GENERAL_SECRETARY", "TREASURER"),
+  uploadSignature.single("signature"),
   (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No signature image file provided" });
+      }
+      const fileUrl = `/uploads/signatures/${req.file.filename}`;
+      res.json({ success: true, fileUrl, filename: req.file.filename });
+    } catch (err) {
+      console.error("SIGNATURE UPLOAD ERROR 👉", err.message);
+      res.status(500).json({ error: "Failed to upload signature" });
+    }
+  }
+);
+
+router.get("/signatures", async (_, res) => {
+  try {
+    const r = await pool.query(
+      "SELECT treasurer_signature_url, gs_signature_url, president_signature_url, association_seal_url FROM association_settings ORDER BY id DESC LIMIT 1"
+    );
     res.json({
       success: true,
-      logo_url: "/uploads/logo/" + req.file.filename,
+      data: r.rows[0] || {
+        treasurer_signature_url: "",
+        gs_signature_url: "",
+        president_signature_url: "",
+        association_seal_url: "",
+      },
     });
+  } catch (err) {
+    console.error("GET SIGNATURES ERROR 👉", err.message);
+    res.status(500).json({ error: "Failed to load signatures" });
+  }
+});
+
+router.put(
+  "/signatures",
+  verifyToken,
+  checkRole("SUPER_ADMIN", "PRESIDENT", "VICE_PRESIDENT", "GENERAL_SECRETARY", "TREASURER"),
+  async (req, res) => {
+    try {
+      const {
+        treasurer_signature_url,
+        gs_signature_url,
+        president_signature_url,
+        association_seal_url,
+      } = req.body;
+
+      const check = await pool.query("SELECT id FROM association_settings ORDER BY id DESC LIMIT 1");
+      if (check.rows.length === 0) {
+        await pool.query(
+          `INSERT INTO association_settings
+           (treasurer_signature_url, gs_signature_url, president_signature_url, association_seal_url)
+           VALUES ($1, $2, $3, $4)`,
+          [treasurer_signature_url || "", gs_signature_url || "", president_signature_url || "", association_seal_url || ""]
+        );
+      } else {
+        await pool.query(
+          `UPDATE association_settings
+           SET treasurer_signature_url = COALESCE($1, treasurer_signature_url),
+               gs_signature_url = COALESCE($2, gs_signature_url),
+               president_signature_url = COALESCE($3, president_signature_url),
+               association_seal_url = COALESCE($4, association_seal_url)
+           WHERE id = $5`,
+          [treasurer_signature_url, gs_signature_url, president_signature_url, association_seal_url, check.rows[0].id]
+        );
+      }
+
+      res.json({ success: true, message: "Digital signatures updated successfully" });
+    } catch (err) {
+      console.error("UPDATE SIGNATURES ERROR 👉", err.message);
+      res.status(500).json({ error: "Failed to update signatures: " + err.message });
+    }
   }
 );
 

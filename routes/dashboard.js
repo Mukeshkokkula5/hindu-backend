@@ -26,14 +26,6 @@ const ROLES = {
 router.get(
   "/admin-summary",
   verifyToken,
-  checkRole(
-    ROLES.SUPER_ADMIN,
-    ROLES.PRESIDENT,
-    ROLES.VICE_PRESIDENT,
-    ROLES.GENERAL_SECRETARY,
-    ROLES.JOINT_SECRETARY,
-    ROLES.EC_MEMBER
-  ),
   async (req, res) => {
     try {
       const [members, approved, cancelled] = await Promise.all([

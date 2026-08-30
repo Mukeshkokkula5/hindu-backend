@@ -1,11 +1,20 @@
+const dotenv = require("dotenv");
+dotenv.config();
 const { Pool } = require("pg");
-console.log("DB URL 👉", process.env.DATABASE_URL);
+
+console.log("🔌 Initializing DB connection pool...");
+
+const isRemoteDb =
+  process.env.DATABASE_URL &&
+  (process.env.DATABASE_URL.includes("supabase.com") ||
+    process.env.DATABASE_URL.includes("neon.tech") ||
+    process.env.DATABASE_URL.includes("render.com") ||
+    process.env.DATABASE_URL.includes("sslmode=require") ||
+    process.env.NODE_ENV === "production");
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === "production"
-    ? { rejectUnauthorized: false }
-    : false,
+  ssl: isRemoteDb ? { rejectUnauthorized: false } : false,
 });
 
 pool.on("connect", () => {
@@ -17,3 +26,4 @@ pool.on("error", (err) => {
 });
 
 module.exports = pool;
+

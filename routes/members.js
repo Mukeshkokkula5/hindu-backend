@@ -4,7 +4,8 @@ const verifyToken = require("../middleware/verifyToken");
 const checkRole = require("../middleware/checkRole");
 const bcrypt = require("bcryptjs");
 const sendMail = require("../utils/sendMail");
-const { addMemberTemplate } = require("../utils/emailTemplates");
+const logAudit = require("../utils/auditLogger");
+const { addMemberTemplate, resendLoginTemplate } = require("../utils/emailTemplates");
 
 const router = express.Router();
 
@@ -14,7 +15,16 @@ const router = express.Router();
 router.get(
   "/",
   verifyToken,
-  checkRole("SUPER_ADMIN", "PRESIDENT"),
+  checkRole(
+    "SUPER_ADMIN",
+    "PRESIDENT",
+    "VICE_PRESIDENT",
+    "GENERAL_SECRETARY",
+    "JOINT_SECRETARY",
+    "TREASURER",
+    "EC_MEMBER",
+    "AUDITOR"
+  ),
   async (req, res) => {
     try {
       const { rows } = await pool.query(`
@@ -28,6 +38,8 @@ router.get(
           address,
           role,
           active,
+          COALESCE(blood_group, 'B+') AS blood_group,
+          COALESCE(photo_url, '/images/leader-president.png') AS photo_url,
           created_at
         FROM users
         WHERE role != 'SUPER_ADMIN'
@@ -60,6 +72,8 @@ router.post(
         address,
         role,
         password,
+        blood_group,
+        photo_url,
       } = req.body;
 
       const rawPassword = password || Math.random().toString(36).slice(-8);
@@ -68,8 +82,8 @@ router.post(
       const result = await pool.query(
         `
         INSERT INTO users
-        (member_id, name, username, personal_email, phone, address, role, password, is_first_login, active)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,true)
+        (member_id, name, username, personal_email, phone, address, role, password, blood_group, photo_url, is_first_login, active)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9,'B+'),COALESCE($10,'/images/leader-president.png'),true,true)
         RETURNING member_id, username
         `,
         [
@@ -81,6 +95,8 @@ router.post(
           address,
           role || "MEMBER",
           hashedPassword,
+          blood_group,
+          photo_url,
         ]
       );
 
@@ -130,9 +146,22 @@ router.put(
         address,
         role,
         active,
+        blood_group,
+        photo_url,
       } = req.body;
 
       const userId = Number(req.params.id);
+
+      /* 🛡️ STRICT SUPER_ADMIN PROTECTION */
+      const targetUser = await pool.query("SELECT role FROM users WHERE id=$1", [userId]);
+      if (!targetUser.rowCount) {
+        return res.status(404).json({ error: "Member not found" });
+      }
+      if (targetUser.rows[0].role === "SUPER_ADMIN") {
+        return res.status(403).json({
+          error: "Strict Security: Super Admin accounts cannot be edited or modified via member management.",
+        });
+      }
 
       /* 🚨 ENFORCE SINGLE VICE PRESIDENT */
       if (role === "VICE_PRESIDENT") {
@@ -158,13 +187,16 @@ router.put(
         `
         UPDATE users
         SET
-          name=$1,
-          personal_email=$2,
-          phone=$3,
-          address=$4,
-          role=$5,
-          active=$6
-        WHERE id=$7
+          name = COALESCE($1, name),
+          personal_email = COALESCE($2, personal_email),
+          phone = COALESCE($3, phone),
+          address = COALESCE($4, address),
+          role = COALESCE($5, role),
+          active = COALESCE($6, active),
+          blood_group = COALESCE($7, blood_group),
+          photo_url = COALESCE($8, photo_url)
+        WHERE id = $9
+        RETURNING id, member_id, name, username, personal_email, phone, address, role, blood_group, photo_url, active
         `,
         [
           name,
@@ -173,6 +205,8 @@ router.put(
           address,
           role,
           active,
+          blood_group,
+          photo_url,
           userId,
         ]
       );
@@ -194,6 +228,14 @@ router.patch(
   checkRole("SUPER_ADMIN", "PRESIDENT"),
   async (req, res) => {
     try {
+      const targetUser = await pool.query("SELECT role FROM users WHERE id=$1", [req.params.id]);
+      if (!targetUser.rowCount) {
+        return res.status(404).json({ error: "Member not found" });
+      }
+      if (targetUser.rows[0].role === "SUPER_ADMIN") {
+        return res.status(403).json({ error: "Strict Security: Super Admin account cannot be deactivated." });
+      }
+
       await pool.query(
         `UPDATE users SET active = NOT active WHERE id=$1`,
         [req.params.id]
@@ -216,6 +258,14 @@ router.delete(
   checkRole("SUPER_ADMIN"),
   async (req, res) => {
     try {
+      const targetUser = await pool.query("SELECT role FROM users WHERE id=$1", [req.params.id]);
+      if (!targetUser.rowCount) {
+        return res.status(404).json({ error: "Member not found" });
+      }
+      if (targetUser.rows[0].role === "SUPER_ADMIN") {
+        return res.status(403).json({ error: "Strict Security: Super Admin account cannot be deleted." });
+      }
+
       await pool.query(`DELETE FROM users WHERE id=$1`, [
         req.params.id,
       ]);
@@ -366,4 +416,71 @@ router.get(
     }
   }
 );
+
+/* =====================================================
+   8️⃣ ADMIN RESET / CHANGE MEMBER PASSWORD (SUPER_ADMIN / PRESIDENT)
+   POST /members/:id/reset-password
+===================================================== */
+router.post(
+  "/:id/reset-password",
+  verifyToken,
+  checkRole("SUPER_ADMIN", "PRESIDENT"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { newPassword, sendEmail = true } = req.body;
+
+      if (!newPassword || newPassword.length < 6) {
+        return res.status(400).json({ error: "Password must be at least 6 characters long" });
+      }
+
+      const userRes = await pool.query(
+        "SELECT id, name, username, personal_email, role FROM users WHERE id=$1",
+        [id]
+      );
+
+      if (!userRes.rowCount) {
+        return res.status(404).json({ error: "Member not found" });
+      }
+
+      const user = userRes.rows[0];
+
+      /* 🛡️ STRICT SUPER_ADMIN PROTECTION */
+      if (user.role === "SUPER_ADMIN") {
+        return res.status(403).json({
+          error: "Strict Security: Super Admin password cannot be reset via member management.",
+        });
+      }
+
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+      await pool.query(
+        "UPDATE users SET password=$1, is_first_login=false WHERE id=$2",
+        [hashedPassword, id]
+      );
+
+      if (sendEmail && user.personal_email) {
+        await sendMail(
+          user.personal_email,
+          "Your HSY Association Password Has Been Reset 🔐",
+          resendLoginTemplate({
+            username: user.username,
+            password: newPassword,
+          })
+        ).catch((err) => console.error("Email send error:", err.message));
+      }
+
+      await logAudit("ADMIN_RESET_PASSWORD", "USER", id, req.user.id);
+
+      res.json({
+        success: true,
+        message: `Password for ${user.name} (${user.role}) has been updated successfully.`,
+      });
+    } catch (err) {
+      console.error("ADMIN RESET PASSWORD ERROR 👉", err.message);
+      res.status(500).json({ error: "Failed to reset member password" });
+    }
+  }
+);
+
 module.exports = router;

@@ -15,16 +15,30 @@ const resend = new Resend(process.env.RESEND_API_KEY);
  * @param {Array} attachments - optional attachments (PDF, etc.)
  * @returns {Promise<boolean>}
  */
-const sendMail = async (to, subject, html, attachments = []) => {
+const sendMail = async (toOrOptions, subjectParam, htmlParam, attachmentsParam = []) => {
   try {
+    let to, subject, html, attachments;
+
+    if (typeof toOrOptions === "object" && toOrOptions !== null && !Array.isArray(toOrOptions)) {
+      to = toOrOptions.to;
+      subject = toOrOptions.subject;
+      html = toOrOptions.html;
+      attachments = toOrOptions.attachments || [];
+    } else {
+      to = toOrOptions;
+      subject = subjectParam;
+      html = htmlParam;
+      attachments = attachmentsParam;
+    }
+
     // 🔎 Basic validation
     if (!to || !subject || !html) {
-      throw new Error("Missing email parameters");
+      throw new Error(`Missing email parameters: to=${Boolean(to)}, subject=${Boolean(subject)}, html=${Boolean(html)}`);
     }
 
     const { data, error } = await resend.emails.send({
-      from: process.env.MAIL_FROM, // ✅ verified domain
-      to: [to],
+      from: process.env.MAIL_FROM || "onboarding@resend.dev", // ✅ verified domain
+      to: Array.isArray(to) ? to : [to],
       subject,
       html,
       attachments, // 📎 PDF / file support
@@ -36,7 +50,7 @@ const sendMail = async (to, subject, html, attachments = []) => {
       return false;
     }
 
-    console.log("📨 EMAIL SENT SUCCESSFULLY");
+    console.log("📨 EMAIL SENT SUCCESSFULLY TO:", to);
     console.log("📨 RESEND MESSAGE ID:", data?.id);
 
     return true;

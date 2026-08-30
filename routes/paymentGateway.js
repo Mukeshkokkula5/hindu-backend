@@ -19,8 +19,12 @@ router.post("/create-order", async (req, res) => {
   try {
     const { payer_name, amount, email, mobile_number, address, fund_type, member_id } = req.body;
 
-    if (!payer_name || !amount || !email || !mobile_number || !address || !fund_type) {
-      return res.status(400).json({ error: "Missing required fields (name, amount, email, mobile, address, fund_type)" });
+    const cleanMobile = mobile_number ? String(mobile_number).trim() : "";
+    const effectiveEmail = email && email.trim() ? email.trim() : `${cleanMobile || 'devotee'}@hinduswaraj.org`;
+    const effectiveAddress = address && address.trim() ? address.trim() : "Jagtial, Telangana";
+
+    if (!payer_name || !amount || !cleanMobile || !fund_type) {
+      return res.status(400).json({ error: "Missing required fields (name, amount, mobile, fund_type)" });
     }
 
     let orderId;
@@ -49,7 +53,7 @@ router.post("/create-order", async (req, res) => {
       INSERT INTO pg_transactions (order_id, payer_name, amount, email, mobile_number, address, fund_type, status, member_id)
       VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8)
       `,
-      [orderId, payer_name, amount, email, mobile_number, address, fund_type, member_id || null]
+      [orderId, payer_name, amount, effectiveEmail, cleanMobile, effectiveAddress, fund_type, member_id || null]
     );
 
     res.json({
@@ -140,8 +144,8 @@ router.post("/verify", express.json(), async (req, res) => {
 
     let isValid = false;
 
-    if (razorpay_order_id && razorpay_order_id.startsWith("order_test_")) {
-      // Test order fallback for local environment
+    if (razorpay_order_id && razorpay_order_id.startsWith("order_test_") && process.env.NODE_ENV !== "production") {
+      // Test order fallback for local development environment
       isValid = true;
     } else if (secret && razorpay_order_id && razorpay_payment_id && razorpay_signature) {
       const shasum = crypto.createHmac('sha256', secret);

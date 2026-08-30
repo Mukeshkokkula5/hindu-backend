@@ -8,7 +8,16 @@ const checkRole = require("../middleware/checkRole");
 /* =====================================================
    ROLES
 ===================================================== */
-const FINANCE_ROLES = ["TREASURER", "SUPER_ADMIN", "PRESIDENT"];
+const FINANCE_ROLES = [
+  "TREASURER",
+  "SUPER_ADMIN",
+  "PRESIDENT",
+  "VICE_PRESIDENT",
+  "GENERAL_SECRETARY",
+  "JOINT_SECRETARY",
+  "EC_MEMBER",
+  "AUDITOR",
+];
 
 /* =====================================================
    0️⃣ PUBLIC FUNDS (NO TOKEN REQUIRED)
