@@ -208,8 +208,22 @@ router.post(
       if (!req.file) {
         return res.status(400).json({ error: "No signature image file provided" });
       }
-      const fileUrl = `/uploads/signatures/${req.file.filename}`;
-      res.json({ success: true, fileUrl, filename: req.file.filename });
+      let fileUrl = `/uploads/signatures/${req.file.filename}`;
+      if (process.env.VERCEL || process.env.NODE_ENV === "production") {
+        if (req.file.path && fs.existsSync(req.file.path)) {
+          const b64 = fs.readFileSync(req.file.path).toString("base64");
+          const mime = req.file.mimetype || "image/png";
+          fileUrl = `data:${mime};base64,${b64}`;
+        }
+      }
+      res.json({
+        success: true,
+        fileUrl,
+        url: fileUrl,
+        photo_url: fileUrl,
+        imageUrl: fileUrl,
+        filename: req.file.filename,
+      });
     } catch (err) {
       console.error("SIGNATURE UPLOAD ERROR 👉", err.message);
       res.status(500).json({ error: "Failed to upload signature" });

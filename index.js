@@ -100,6 +100,13 @@ app.use(
    🗂 STATIC FILES
 ========================= */
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+if (process.env.VERCEL || process.env.NODE_ENV === "production") {
+  app.use("/uploads", express.static("/tmp"));
+  app.use("/uploads/blood", express.static("/tmp"));
+  app.use("/uploads/signatures", express.static("/tmp"));
+  app.use("/uploads/aapadbandhava", express.static("/tmp"));
+}
+
 
 /* =========================
    🔌 DB HEALTH CHECK & MIGRATIONS

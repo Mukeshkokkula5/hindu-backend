@@ -186,11 +186,21 @@ router.post(
         return res.status(400).json({ success: false, error: "No image file provided" });
       }
 
-      const relativePath = `/uploads/${req.file.filename}`;
+      let relativePath = `/uploads/${req.file.filename}`;
+      if (process.env.VERCEL || process.env.NODE_ENV === "production") {
+        if (req.file.path && fs.existsSync(req.file.path)) {
+          const b64 = fs.readFileSync(req.file.path).toString("base64");
+          const mime = req.file.mimetype || "image/jpeg";
+          relativePath = `data:${mime};base64,${b64}`;
+        }
+      }
       res.json({
         success: true,
         message: "Image uploaded successfully!",
         imageUrl: relativePath,
+        url: relativePath,
+        fileUrl: relativePath,
+        photo_url: relativePath,
         filename: req.file.filename,
       });
     } catch (err) {
