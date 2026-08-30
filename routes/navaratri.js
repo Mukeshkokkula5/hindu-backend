@@ -249,6 +249,10 @@ router.get(["/info", "/settings"], async (req, res) => {
         laddu_auction_info: "Grand Maha Laddu Auction on Day 9 (22 Sep) at 6:00 PM",
         pandal_map_url: "https://maps.google.com/?q=Jagtial+Telangana",
       };
+    } else {
+      if (settings.banner_image && typeof settings.banner_image === "string" && settings.banner_image.includes("data:image/")) {
+        settings.banner_image = settings.banner_image.substring(settings.banner_image.indexOf("data:image/"));
+      }
     }
 
     res.json({
@@ -843,6 +847,10 @@ router.put(
       } = req.body;
 
       const youtube_embed_id = extractYouTubeId(youtube_url);
+      let sanitizedBanner = banner_image;
+      if (sanitizedBanner && typeof sanitizedBanner === "string" && sanitizedBanner.includes("data:image/")) {
+        sanitizedBanner = sanitizedBanner.substring(sanitizedBanner.indexOf("data:image/"));
+      }
 
       const check = await pool.query("SELECT id FROM navaratri_settings LIMIT 1");
       let result;
@@ -861,7 +869,7 @@ router.put(
             youtube_embed_id,
             stream_title || "Vinayaka Navaratri Seva 2026 - Live Darshan",
             live_announcement || "",
-            banner_image || "/images/navaratri-ganesha.jpg",
+            sanitizedBanner || "/images/navaratri-ganesha.jpg",
             location || "Jagtial, Telangana",
             start_date || "2026-09-14",
             end_date || "2026-09-24",
@@ -960,7 +968,7 @@ router.put(
             youtube_embed_id,
             stream_title,
             live_announcement,
-            banner_image,
+            sanitizedBanner,
             location,
             start_date,
             end_date,
