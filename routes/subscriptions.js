@@ -805,9 +805,13 @@ router.get("/receipt-data/:id", verifyToken, async (req, res) => {
     res.json({
       due,
       signatures: {
-        president_signature_url: sig.president_signature_url,
-        treasurer_signature_url: sig.treasurer_signature_url,
-        association_seal_url: sig.association_seal_url,
+        president_name: sig.president_name || "Vinodh Kumar K",
+        gs_name: sig.gs_name || "Mani Deep",
+        treasurer_name: sig.treasurer_name || "Treasurer",
+        president_signature_url: sig.president_signature_url || "",
+        treasurer_signature_url: sig.treasurer_signature_url || "",
+        gs_signature_url: sig.gs_signature_url || "",
+        association_seal_url: sig.association_seal_url || "",
       },
     });
   } catch (err) {
