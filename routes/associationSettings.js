@@ -234,11 +234,14 @@ router.post(
 router.get("/signatures", async (_, res) => {
   try {
     const r = await pool.query(
-      "SELECT treasurer_signature_url, gs_signature_url, president_signature_url, association_seal_url FROM association_settings ORDER BY id DESC LIMIT 1"
+      "SELECT president_name, gs_name, treasurer_name, treasurer_signature_url, gs_signature_url, president_signature_url, association_seal_url FROM association_settings ORDER BY id DESC LIMIT 1"
     );
     res.json({
       success: true,
       data: r.rows[0] || {
+        president_name: "Vinodh Kumar K",
+        gs_name: "Mani Deep",
+        treasurer_name: "Treasurer",
         treasurer_signature_url: "",
         gs_signature_url: "",
         president_signature_url: "",
@@ -258,6 +261,9 @@ router.put(
   async (req, res) => {
     try {
       const {
+        president_name,
+        gs_name,
+        treasurer_name,
         treasurer_signature_url,
         gs_signature_url,
         president_signature_url,
@@ -268,23 +274,43 @@ router.put(
       if (check.rows.length === 0) {
         await pool.query(
           `INSERT INTO association_settings
-           (treasurer_signature_url, gs_signature_url, president_signature_url, association_seal_url)
-           VALUES ($1, $2, $3, $4)`,
-          [treasurer_signature_url || "", gs_signature_url || "", president_signature_url || "", association_seal_url || ""]
+           (president_name, gs_name, treasurer_name, treasurer_signature_url, gs_signature_url, president_signature_url, association_seal_url)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            president_name || "Vinodh Kumar K",
+            gs_name || "Mani Deep",
+            treasurer_name || "Treasurer",
+            treasurer_signature_url || "",
+            gs_signature_url || "",
+            president_signature_url || "",
+            association_seal_url || ""
+          ]
         );
       } else {
         await pool.query(
           `UPDATE association_settings
-           SET treasurer_signature_url = COALESCE($1, treasurer_signature_url),
-               gs_signature_url = COALESCE($2, gs_signature_url),
-               president_signature_url = COALESCE($3, president_signature_url),
-               association_seal_url = COALESCE($4, association_seal_url)
-           WHERE id = $5`,
-          [treasurer_signature_url, gs_signature_url, president_signature_url, association_seal_url, check.rows[0].id]
+           SET president_name = COALESCE($1, president_name),
+               gs_name = COALESCE($2, gs_name),
+               treasurer_name = COALESCE($3, treasurer_name),
+               treasurer_signature_url = COALESCE($4, treasurer_signature_url),
+               gs_signature_url = COALESCE($5, gs_signature_url),
+               president_signature_url = COALESCE($6, president_signature_url),
+               association_seal_url = COALESCE($7, association_seal_url)
+           WHERE id = $8`,
+          [
+            president_name !== undefined ? president_name : null,
+            gs_name !== undefined ? gs_name : null,
+            treasurer_name !== undefined ? treasurer_name : null,
+            treasurer_signature_url !== undefined ? treasurer_signature_url : null,
+            gs_signature_url !== undefined ? gs_signature_url : null,
+            president_signature_url !== undefined ? president_signature_url : null,
+            association_seal_url !== undefined ? association_seal_url : null,
+            check.rows[0].id
+          ]
         );
       }
 
-      res.json({ success: true, message: "Digital signatures updated successfully" });
+      res.json({ success: true, message: "Digital signatures and officer names updated successfully" });
     } catch (err) {
       console.error("UPDATE SIGNATURES ERROR 👉", err.message);
       res.status(500).json({ error: "Failed to update signatures: " + err.message });

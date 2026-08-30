@@ -135,7 +135,7 @@ router.get("/public", async (req, res) => {
 
     // Fetch official association settings for digital certificate signatures & seal
     const assocRes = await pool.query(`
-      SELECT association_name, president_signature_url, gs_signature_url, treasurer_signature_url, association_seal_url, regd_no
+      SELECT association_name, president_name, gs_name, treasurer_name, president_signature_url, gs_signature_url, treasurer_signature_url, association_seal_url, regd_no
       FROM association_settings
       ORDER BY id DESC LIMIT 1
     `);
