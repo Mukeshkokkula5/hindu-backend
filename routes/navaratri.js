@@ -1068,6 +1068,55 @@ router.post(
 );
 
 /* =====================================================
+   ✏️ 7B. ADMIN: UPDATE DAILY PHOTO POST / UPDATE
+   PUT /navaratri/posts/:id
+===================================================== */
+router.put(
+  "/posts/:id",
+  verifyToken,
+  checkRole("SUPER_ADMIN", "PRESIDENT"),
+  async (req, res) => {
+    try {
+      const { day_number, title, description, image_url, category } = req.body;
+
+      const result = await pool.query(
+        `
+        UPDATE navaratri_posts
+        SET day_number = COALESCE($1, day_number),
+            title = COALESCE($2, title),
+            description = COALESCE($3, description),
+            image_url = COALESCE($4, image_url),
+            category = COALESCE($5, category)
+        WHERE id = $6
+        RETURNING *
+        `,
+        [
+          day_number !== undefined ? Number(day_number) : null,
+          title ? title.trim() : null,
+          description !== undefined ? (description ? description.trim() : "") : null,
+          image_url ? image_url.trim() : null,
+          category || null,
+          req.params.id,
+        ]
+      );
+
+      if (result.rowCount === 0) {
+        return res.status(404).json({ success: false, error: "Post not found" });
+      }
+
+      res.json({
+        success: true,
+        message: "Photo update edited successfully!",
+        data: result.rows[0],
+      });
+    } catch (err) {
+      console.error("UPDATE NAVARATRI POST ERROR 👉", err.message);
+      res.status(500).json({ success: false, error: "Failed to update post: " + err.message });
+    }
+  }
+);
+
+/* =====================================================
    🗑️ 8. ADMIN: DELETE DAILY POST
    DELETE /navaratri/posts/:id
 ===================================================== */
