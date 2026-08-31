@@ -93,17 +93,38 @@ const isOfficeBearer = (req) => {
       );
     `);
 
+    // 3. User Concession Columns Migration
+    await pool.query(`
+      ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS concession_status VARCHAR(20) DEFAULT 'NONE',
+      ADD COLUMN IF NOT EXISTS concession_reason TEXT,
+      ADD COLUMN IF NOT EXISTS concession_requested_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS concession_approved_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS concession_approved_by INT;
+    `);
+
     // Add indexes for high performance lookup
     await pool.query(`
       CREATE INDEX IF NOT EXISTS idx_dues_user_month ON member_subscription_dues (user_id, month_year);
       CREATE INDEX IF NOT EXISTS idx_dues_status ON member_subscription_dues (status);
     `);
 
-    console.log("✅ Monthly Subscriptions Database Engine Initialized");
+    console.log("✅ Monthly Subscriptions & Concession Engine Initialized");
   } catch (err) {
     console.error("Subscription migration error:", err.message);
   }
 })();
+
+// Helper: Determine exact subscription fee for a user
+const getUserSubscriptionFee = (user, settings = {}) => {
+  const std = Number(settings.standard_amount || 216);
+  const conc = Number(settings.concession_amount || 116);
+  const role = normalizeRole(user.role);
+  if (role === "VOLUNTEER" || user.concession_status === "APPROVED") {
+    return conc;
+  }
+  return std;
+};
 
 /* ======================================================
    ⚙️ 1. SUBSCRIPTION CONFIGURATION (SUPER ADMIN & PRESIDENT)
@@ -192,23 +213,23 @@ router.put("/settings", verifyToken, async (req, res) => {
 async function syncMonthDuesForActiveUsers(monthYear) {
   try {
     const settingsRes = await pool.query("SELECT * FROM monthly_subscription_settings ORDER BY id DESC LIMIT 1");
-    const standardAmount = Number(settingsRes.rows[0]?.standard_amount || 216);
-    const concessionAmount = Number(settingsRes.rows[0]?.concession_amount || 116);
+    const settings = settingsRes.rows[0] || {};
 
-    // Get all active users
+    // Get all active users with their role and concession status
     const usersRes = await pool.query(
-      "SELECT id, role, active FROM users WHERE (active = true OR active IS NULL) AND role != 'SUPER_ADMIN'"
+      "SELECT id, role, active, concession_status FROM users WHERE (active = true OR active IS NULL) AND role != 'SUPER_ADMIN'"
     );
 
     for (const u of usersRes.rows) {
-      const userRole = normalizeRole(u.role);
-      const fee = userRole === "VOLUNTEER" ? concessionAmount : standardAmount;
+      const fee = getUserSubscriptionFee(u, settings);
 
       await pool.query(
         `
         INSERT INTO member_subscription_dues (user_id, month_year, amount, status)
         VALUES ($1, $2, $3, 'PENDING')
-        ON CONFLICT (user_id, month_year) DO NOTHING
+        ON CONFLICT (user_id, month_year) DO UPDATE
+        SET amount = EXCLUDED.amount
+        WHERE member_subscription_dues.status = 'PENDING'
         `,
         [u.id, monthYear, fee]
       );
@@ -240,6 +261,10 @@ router.get("/dues-matrix", verifyToken, async (req, res) => {
         u.role,
         u.member_id AS association_id,
         u.active,
+        COALESCE(u.concession_status, 'NONE') AS concession_status,
+        u.concession_reason,
+        u.concession_requested_at,
+        u.concession_approved_at,
         COALESCE(d.id, 0) AS due_id,
         COALESCE(d.amount, 216.00) AS due_amount,
         COALESCE(d.status, 'PENDING') AS due_status,
@@ -254,7 +279,7 @@ router.get("/dues-matrix", verifyToken, async (req, res) => {
       LEFT JOIN member_subscription_dues d ON d.user_id = u.id AND d.month_year = $1
       WHERE u.role != 'SUPER_ADMIN'
       ORDER BY
-        CASE WHEN COALESCE(d.status, 'PENDING') = 'PENDING' THEN 1 ELSE 2 END,
+        CASE WHEN u.concession_status = 'REQUESTED' THEN 1 WHEN COALESCE(d.status, 'PENDING') = 'PENDING' THEN 2 ELSE 3 END,
         u.name ASC
       `,
       [monthYear]
@@ -271,6 +296,9 @@ router.get("/dues-matrix", verifyToken, async (req, res) => {
     const totalExpected = rows.reduce((sum, r) => sum + Number(r.due_amount || 0), 0);
     const outstandingDues = totalExpected - totalCollected;
 
+    // Count pending concession requests
+    const pendingConcessionsCount = rows.filter((r) => r.concession_status === "REQUESTED").length;
+
     res.json({
       month_year: monthYear,
       summary: {
@@ -281,6 +309,7 @@ router.get("/dues-matrix", verifyToken, async (req, res) => {
         total_collected: totalCollected,
         outstanding_dues: outstandingDues,
         collection_percentage: totalExpected > 0 ? Number(((totalCollected / totalExpected) * 100).toFixed(1)) : 0,
+        pending_concessions_count: pendingConcessionsCount,
       },
       members: rows,
     });
@@ -309,6 +338,14 @@ router.get("/my-status", verifyToken, async (req, res) => {
       public_seva_pct: 20,
     };
 
+    // Current User Profile for Concession
+    const userRes = await pool.query(
+      "SELECT id, name, phone, role, concession_status, concession_reason, concession_requested_at, concession_approved_at FROM users WHERE id = $1",
+      [req.user.id]
+    );
+    const userProfile = userRes.rows[0] || req.user;
+    const applicableFee = getUserSubscriptionFee(userProfile, settings);
+
     // Current Month Status
     const currentDueRes = await pool.query(
       `
@@ -320,7 +357,7 @@ router.get("/my-status", verifyToken, async (req, res) => {
 
     const currentDue = currentDueRes.rows[0] || {
       month_year: currentMonth,
-      amount: normalizeRole(req.user.role) === "VOLUNTEER" ? settings.concession_amount : settings.standard_amount,
+      amount: applicableFee,
       status: "PENDING",
     };
 
@@ -344,6 +381,14 @@ router.get("/my-status", verifyToken, async (req, res) => {
       current_month: currentMonth,
       current_due: currentDue,
       settings,
+      user_concession: {
+        status: userProfile.concession_status || "NONE",
+        reason: userProfile.concession_reason || "",
+        requested_at: userProfile.concession_requested_at,
+        approved_at: userProfile.concession_approved_at,
+        applicable_fee: applicableFee,
+        is_concession_active: userProfile.concession_status === "APPROVED" || normalizeRole(userProfile.role) === "VOLUNTEER",
+      },
       summary: {
         total_paid_lifetime: totalPaidLifetime,
         paid_months_count: historyRes.rows.filter((r) => r.status === "PAID").length,
@@ -376,9 +421,14 @@ router.post("/create-order", verifyToken, async (req, res) => {
     const targetMonth = month_year || new Date().toISOString().slice(0, 7);
 
     const settingsRes = await pool.query("SELECT * FROM monthly_subscription_settings ORDER BY id DESC LIMIT 1");
-    const standardAmount = Number(settingsRes.rows[0]?.standard_amount || 216);
-    const concessionAmount = Number(settingsRes.rows[0]?.concession_amount || 116);
-    const amount = normalizeRole(req.user.role) === "VOLUNTEER" ? concessionAmount : standardAmount;
+    const settings = settingsRes.rows[0] || {};
+
+    const userRes = await pool.query(
+      "SELECT id, name, phone, role, concession_status FROM users WHERE id = $1",
+      [req.user.id]
+    );
+    const userProfile = userRes.rows[0] || req.user;
+    const amount = getUserSubscriptionFee(userProfile, settings);
 
     let orderId;
     const orderAmount = Math.round(amount * 100); // in paise
@@ -465,9 +515,14 @@ router.post("/verify-online-payment", verifyToken, async (req, res) => {
     }
 
     const settingsRes = await pool.query("SELECT * FROM monthly_subscription_settings ORDER BY id DESC LIMIT 1");
-    const standardAmount = Number(settingsRes.rows[0]?.standard_amount || 216);
-    const concessionAmount = Number(settingsRes.rows[0]?.concession_amount || 116);
-    const amount = normalizeRole(req.user.role) === "VOLUNTEER" ? concessionAmount : standardAmount;
+    const settings = settingsRes.rows[0] || {};
+
+    const userRes = await pool.query(
+      "SELECT id, name, phone, role, concession_status FROM users WHERE id = $1",
+      [req.user.id]
+    );
+    const userProfile = userRes.rows[0] || req.user;
+    const amount = getUserSubscriptionFee(userProfile, settings);
 
     const paymentId = razorpay_payment_id || `pay_${Date.now()}`;
     const receiptNo = `HSY-SUB-${targetMonth.replace("-", "")}-${Math.floor(100000 + Math.random() * 900000)}`;
@@ -481,6 +536,7 @@ router.post("/verify-online-payment", verifyToken, async (req, res) => {
       ON CONFLICT (user_id, month_year)
       DO UPDATE SET
         status = 'PAID',
+        amount = $3,
         payment_mode = 'ONLINE_RAZORPAY',
         receipt_no = COALESCE(member_subscription_dues.receipt_no, $4),
         transaction_id = $5,
@@ -535,9 +591,14 @@ router.post("/pay-dues", verifyToken, async (req, res) => {
     const targetMonth = month_year || new Date().toISOString().slice(0, 7);
 
     const settingsRes = await pool.query("SELECT * FROM monthly_subscription_settings ORDER BY id DESC LIMIT 1");
-    const standardAmount = Number(settingsRes.rows[0]?.standard_amount || 216);
-    const concessionAmount = Number(settingsRes.rows[0]?.concession_amount || 116);
-    const amount = normalizeRole(req.user.role) === "VOLUNTEER" ? concessionAmount : standardAmount;
+    const settings = settingsRes.rows[0] || {};
+
+    const userRes = await pool.query(
+      "SELECT id, name, phone, role, concession_status FROM users WHERE id = $1",
+      [req.user.id]
+    );
+    const userProfile = userRes.rows[0] || req.user;
+    const amount = getUserSubscriptionFee(userProfile, settings);
 
     const receiptNo = `HSY-SUB-${targetMonth.replace("-", "")}-${Math.floor(100000 + Math.random() * 900000)}`;
 
@@ -549,6 +610,7 @@ router.post("/pay-dues", verifyToken, async (req, res) => {
       ON CONFLICT (user_id, month_year)
       DO UPDATE SET
         status = 'PAID',
+        amount = $3,
         payment_mode = $4,
         receipt_no = COALESCE(member_subscription_dues.receipt_no, $5),
         transaction_id = $6,
@@ -600,13 +662,16 @@ router.post("/record-offline", verifyToken, async (req, res) => {
       return res.status(400).json({ error: "Member ID and Month/Year are required" });
     }
 
-    const userRes = await pool.query("SELECT id, name, phone, role FROM users WHERE id = $1", [user_id]);
+    const settingsRes = await pool.query("SELECT * FROM monthly_subscription_settings ORDER BY id DESC LIMIT 1");
+    const settings = settingsRes.rows[0] || {};
+
+    const userRes = await pool.query("SELECT id, name, phone, role, concession_status FROM users WHERE id = $1", [user_id]);
     if (!userRes.rows.length) {
       return res.status(404).json({ error: "Member not found" });
     }
     const member = userRes.rows[0];
 
-    const fee = Number(amount) || (normalizeRole(member.role) === "VOLUNTEER" ? 116 : 216);
+    const fee = Number(amount) || getUserSubscriptionFee(member, settings);
     const receiptNo = `HSY-SUB-${month_year.replace("-", "")}-${Math.floor(100000 + Math.random() * 900000)}`;
 
     const { rows } = await pool.query(
@@ -655,6 +720,253 @@ router.post("/record-offline", verifyToken, async (req, res) => {
   } catch (err) {
     console.error("RECORD OFFLINE SUBSCRIPTION ERROR:", err);
     res.status(500).json({ error: "Failed to record offline subscription payment" });
+  }
+});
+
+/* ======================================================
+   🏷️ 4B. CONCESSION REQUESTS & APPROVALS (₹116 / MONTH)
+====================================================== */
+
+// 1. Member submits concession application
+router.post("/concession/request", verifyToken, async (req, res) => {
+  try {
+    const { reason } = req.body;
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ error: "Please provide a reason for subscription concession (e.g. Student / Financial Relief)" });
+    }
+
+    const { rows } = await pool.query(
+      `
+      UPDATE users
+      SET concession_status = 'REQUESTED',
+          concession_reason = $1,
+          concession_requested_at = NOW()
+      WHERE id = $2
+      RETURNING id, name, role, concession_status, concession_reason, concession_requested_at
+      `,
+      [reason.trim(), req.user.id]
+    );
+
+    // Create notification for Super Admin & President
+    await pool.query(
+      `
+      INSERT INTO notifications (user_id, title, message, link, is_read, created_at)
+      SELECT id, '🏷️ New Member Subscription Concession Request', 
+             $1 || ' has submitted a concession request for monthly dues (₹116/month). Reason: ' || $2,
+             '/admin', false, NOW()
+      FROM users
+      WHERE role IN ('SUPER_ADMIN', 'PRESIDENT', 'ADMIN')
+      `,
+      [req.user.name || "A member", reason.trim()]
+    ).catch(() => {});
+
+    res.json({
+      success: true,
+      message: "✅ Concession request submitted successfully! Super Admin will review and approve your ₹116 monthly rate.",
+      user: rows[0],
+    });
+  } catch (err) {
+    console.error("CONCESSION REQUEST ERROR:", err);
+    res.status(500).json({ error: "Failed to submit concession request: " + err.message });
+  }
+});
+
+// 2. Super Admin / President gets all concession requests
+router.get("/concession/requests", verifyToken, async (req, res) => {
+  if (!isSuperAdminOrPresident(req) && !isOfficeBearer(req)) {
+    return res.status(403).json({ error: "Access denied" });
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `
+      SELECT
+        u.id AS user_id,
+        u.name,
+        u.phone,
+        u.role,
+        u.member_id AS association_id,
+        u.concession_status,
+        u.concession_reason,
+        u.concession_requested_at,
+        u.concession_approved_at,
+        approver.name AS approved_by_name
+      FROM users u
+      LEFT JOIN users approver ON approver.id = u.concession_approved_by
+      WHERE u.concession_status IN ('REQUESTED', 'APPROVED', 'REJECTED')
+      ORDER BY
+        CASE WHEN u.concession_status = 'REQUESTED' THEN 1 WHEN u.concession_status = 'APPROVED' THEN 2 ELSE 3 END,
+        u.concession_requested_at DESC
+      `
+    );
+
+    res.json({
+      success: true,
+      requests: rows,
+    });
+  } catch (err) {
+    console.error("GET CONCESSION REQUESTS ERROR:", err);
+    res.status(500).json({ error: "Failed to fetch concession requests" });
+  }
+});
+
+// 3. Super Admin / President approves concession
+router.put("/concession/:userId/approve", verifyToken, async (req, res) => {
+  if (!isSuperAdminOrPresident(req)) {
+    return res.status(403).json({ error: "Access denied: Only Super Admin or President can approve subscription concessions" });
+  }
+
+  try {
+    const { userId } = req.params;
+
+    const settingsRes = await pool.query("SELECT * FROM monthly_subscription_settings ORDER BY id DESC LIMIT 1");
+    const concessionAmount = Number(settingsRes.rows[0]?.concession_amount || 116);
+
+    const userRes = await pool.query(
+      `
+      UPDATE users
+      SET concession_status = 'APPROVED',
+          concession_approved_at = NOW(),
+          concession_approved_by = $1
+      WHERE id = $2
+      RETURNING id, name, phone, role, concession_status
+      `,
+      [req.user.id, userId]
+    );
+
+    if (!userRes.rows.length) {
+      return res.status(404).json({ error: "Member not found" });
+    }
+
+    const member = userRes.rows[0];
+
+    // Update existing PENDING dues for this user to the concession amount
+    await pool.query(
+      `
+      UPDATE member_subscription_dues
+      SET amount = $1,
+          notes = COALESCE(notes, '') || ' [Concession Rate ₹' || $1 || ' Approved]'
+      WHERE user_id = $2 AND status = 'PENDING'
+      `,
+      [concessionAmount, userId]
+    );
+
+    // Send in-portal notification to member
+    await pool.query(
+      `
+      INSERT INTO notifications (user_id, title, message, link, is_read, created_at)
+      VALUES ($1, '🎉 Subscription Concession Approved!', 'Namaste ' || $2 || ', your request for monthly subscription concession has been approved. Your monthly fee is now ₹' || $3 || '.00.', '/admin', false, NOW())
+      `,
+      [userId, member.name, concessionAmount]
+    ).catch(() => {});
+
+    res.json({
+      success: true,
+      message: `✅ Concession approved for ${member.name}! Monthly dues updated to ₹${concessionAmount}.`,
+      member,
+    });
+  } catch (err) {
+    console.error("APPROVE CONCESSION ERROR:", err);
+    res.status(500).json({ error: "Failed to approve concession: " + err.message });
+  }
+});
+
+// 4. Super Admin / President rejects concession
+router.put("/concession/:userId/reject", verifyToken, async (req, res) => {
+  if (!isSuperAdminOrPresident(req)) {
+    return res.status(403).json({ error: "Access denied: Only Super Admin or President can reject subscription concessions" });
+  }
+
+  try {
+    const { userId } = req.params;
+
+    const userRes = await pool.query(
+      `
+      UPDATE users
+      SET concession_status = 'REJECTED'
+      WHERE id = $1
+      RETURNING id, name, role, concession_status
+      `,
+      [userId]
+    );
+
+    if (!userRes.rows.length) {
+      return res.status(404).json({ error: "Member not found" });
+    }
+
+    const member = userRes.rows[0];
+
+    // Send notification to member
+    await pool.query(
+      `
+      INSERT INTO notifications (user_id, title, message, link, is_read, created_at)
+      VALUES ($1, 'ℹ️ Subscription Concession Request Update', 'Namaste ' || $2 || ', your request for subscription concession could not be approved at this time. Standard membership rate of ₹216 applies.', '/admin', false, NOW())
+      `,
+      [userId, member.name]
+    ).catch(() => {});
+
+    res.json({
+      success: true,
+      message: `Concession request for ${member.name} marked as rejected.`,
+      member,
+    });
+  } catch (err) {
+    console.error("REJECT CONCESSION ERROR:", err);
+    res.status(500).json({ error: "Failed to reject concession: " + err.message });
+  }
+});
+
+// 5. Super Admin / President 1-Click Direct Toggle
+router.put("/concession/:userId/toggle", verifyToken, async (req, res) => {
+  if (!isSuperAdminOrPresident(req)) {
+    return res.status(403).json({ error: "Access denied: Only Super Admin or President can toggle concession" });
+  }
+
+  try {
+    const { userId } = req.params;
+
+    const cur = await pool.query("SELECT id, name, concession_status FROM users WHERE id = $1", [userId]);
+    if (!cur.rows.length) {
+      return res.status(404).json({ error: "Member not found" });
+    }
+
+    const isCurrentlyApproved = cur.rows[0].concession_status === "APPROVED";
+    const nextStatus = isCurrentlyApproved ? "NONE" : "APPROVED";
+
+    const settingsRes = await pool.query("SELECT * FROM monthly_subscription_settings ORDER BY id DESC LIMIT 1");
+    const standardAmount = Number(settingsRes.rows[0]?.standard_amount || 216);
+    const concessionAmount = Number(settingsRes.rows[0]?.concession_amount || 116);
+    const newFee = nextStatus === "APPROVED" ? concessionAmount : standardAmount;
+
+    await pool.query(
+      `
+      UPDATE users
+      SET concession_status = $1,
+          concession_approved_at = CASE WHEN $1 = 'APPROVED' THEN NOW() ELSE NULL END,
+          concession_approved_by = CASE WHEN $1 = 'APPROVED' THEN $2 ELSE NULL END
+      WHERE id = $3
+      `,
+      [nextStatus, req.user.id, userId]
+    );
+
+    // Update pending dues
+    await pool.query(
+      `
+      UPDATE member_subscription_dues
+      SET amount = $1
+      WHERE user_id = $2 AND status = 'PENDING'
+      `,
+      [newFee, userId]
+    );
+
+    res.json({
+      success: true,
+      message: `✅ Concession for ${cur.rows[0].name} is now ${nextStatus === "APPROVED" ? `GRANTED (₹${concessionAmount}/month)` : `REVERTED (₹${standardAmount}/month)`}!`,
+      concession_status: nextStatus,
+    });
+  } catch (err) {
+    console.error("TOGGLE CONCESSION ERROR:", err);
+    res.status(500).json({ error: "Failed to toggle concession: " + err.message });
   }
 });
 
