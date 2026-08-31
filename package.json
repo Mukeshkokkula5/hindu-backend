@@ -8,6 +8,7 @@
     "dev": "nodemon index.js"
   },
   "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "axios": "^1.19.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
@@ -20,6 +21,7 @@
     "nodemailer": "^7.0.12",
     "pdfkit": "^0.15.0",
     "pg": "^8.11.3",
+    "pino": "^10.3.1",
     "qrcode": "^1.5.4",
     "razorpay": "^2.9.8",
     "resend": "^6.6.0"

@@ -514,6 +514,11 @@ app.use("/payment", require("./routes/paymentGateway"));
 app.use("/chatbot", require("./routes/chatbot"));
 app.use("/aapadbandhava", require("./routes/aapadbandhava"));
 app.use("/community", require("./routes/community"));
+app.use("/whatsapp", require("./routes/whatsapp"));
+
+// Initialize WhatsApp Gateway on server start
+const { initWhatsApp } = require("./services/whatsappBot");
+initWhatsApp().catch((err) => console.warn("WhatsApp initial connection notice:", err.message));
 
 /* =========================
    🏠 ROOT & HEALTH

@@ -22,8 +22,10 @@ uploads/
 # Scratch files
 scratch/
 
+# WhatsApp Baileys session storage
+auth_info_baileys/
+baileys_auth_hsy/
+
 # OS metadata
 .DS_Store
 Thumbs.db
-
-

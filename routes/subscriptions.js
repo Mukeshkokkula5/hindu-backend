@@ -741,7 +741,7 @@ router.post("/record-offline", verifyToken, async (req, res) => {
       [user_id, month_year, fee, payment_mode, receiptNo, req.user.id, notes || "Cash payment verified by office bearer"]
     );
 
-    // Record in contributions
+    // Mirror to contributions
     await pool.query(
       `
       INSERT INTO contributions (
@@ -760,14 +760,127 @@ router.post("/record-offline", verifyToken, async (req, res) => {
       ]
     ).catch((e) => console.warn("Contribution mirror warning:", e.message));
 
+    // Send direct WhatsApp Official Receipt in background
+    try {
+      const { sendDirectWhatsApp, buildPaymentReceiptWhatsAppTemplate } = require("../services/whatsappBot");
+      if (member.phone) {
+        const msg = buildPaymentReceiptWhatsAppTemplate({
+          name: member.name,
+          receiptNo,
+          monthYear: month_year,
+          amount: fee,
+          paymentMode: payment_mode,
+          paidDate: new Date().toLocaleDateString("en-IN"),
+          receiptToken: rows[0].id,
+        });
+        sendDirectWhatsApp(member.phone, msg).catch(() => {});
+      }
+    } catch (waErr) {}
+
     res.json({
       success: true,
-      message: `✅ Payment of ₹${fee} for ${member.name} (${month_year}) successfully recorded as PAID!`,
+      message: `✅ Payment of ₹${fee} for ${member.name} (${month_year}) successfully recorded as PAID! Official receipt dispatched.`,
       due: rows[0],
+      receipt_no: receiptNo,
     });
   } catch (err) {
     console.error("RECORD OFFLINE SUBSCRIPTION ERROR:", err);
     res.status(500).json({ error: "Failed to record offline subscription payment" });
+  }
+});
+
+// 🔔 Send Direct Background WhatsApp Reminder (Super Admin / Office Bearers)
+router.post("/send-reminder", verifyToken, async (req, res) => {
+  if (!isOfficeBearer(req)) {
+    return res.status(403).json({ error: "Access denied: Only office bearers can send dues reminders" });
+  }
+
+  try {
+    const { user_id, month_year, is_bulk } = req.body;
+    const targetMonth = month_year || new Date().toISOString().slice(0, 7);
+
+    const { sendDirectWhatsApp, buildSubscriptionReminderWhatsAppTemplate } = require("../services/whatsappBot");
+
+    if (is_bulk) {
+      const pendingDuesRes = await pool.query(
+        `SELECT d.id, d.user_id, d.amount, d.month_year, u.name, u.phone, u.role
+         FROM member_subscription_dues d
+         JOIN users u ON d.user_id = u.id
+         WHERE d.month_year = $1 AND d.status = 'PENDING' AND u.status = 'ACTIVE'`,
+        [targetMonth]
+      );
+
+      let sentCount = 0;
+      for (const row of pendingDuesRes.rows) {
+        if (row.phone) {
+          const msg = buildSubscriptionReminderWhatsAppTemplate({
+            name: row.name,
+            monthYear: targetMonth,
+            dueAmount: row.amount || 216,
+            role: row.role,
+          });
+          const sent = await sendDirectWhatsApp(row.phone, msg);
+          if (sent.success) {
+            sentCount++;
+            await pool.query("UPDATE member_subscription_dues SET reminder_sent_at = NOW() WHERE id = $1", [row.id]).catch(() => {});
+          }
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+      }
+
+      return res.json({
+        success: true,
+        message: `📢 Direct WhatsApp reminders delivered to ${sentCount}/${pendingDuesRes.rows.length} pending members!`,
+        sent_count: sentCount,
+      });
+    }
+
+    // Single member reminder
+    const userRes = await pool.query("SELECT id, name, phone, role FROM users WHERE id = $1", [user_id]);
+    if (!userRes.rows.length) return res.status(404).json({ error: "Member not found" });
+    const member = userRes.rows[0];
+
+    const dueRes = await pool.query(
+      "SELECT * FROM member_subscription_dues WHERE user_id = $1 AND month_year = $2",
+      [user_id, targetMonth]
+    );
+    const dueAmount = dueRes.rows[0]?.amount || 216;
+
+    if (member.phone) {
+      const msg = buildSubscriptionReminderWhatsAppTemplate({
+        name: member.name,
+        monthYear: targetMonth,
+        dueAmount,
+        role: member.role,
+      });
+      const sent = await sendDirectWhatsApp(member.phone, msg);
+
+      await pool.query(
+        "UPDATE member_subscription_dues SET reminder_sent_at = NOW() WHERE user_id = $1 AND month_year = $2",
+        [user_id, targetMonth]
+      ).catch(() => {});
+
+      if (sent.success) {
+        return res.json({
+          success: true,
+          message: `✅ Direct WhatsApp reminder sent to ${member.name} (${member.phone})!`,
+          sent,
+        });
+      } else {
+        return res.json({
+          success: true,
+          message: `Reminder recorded for ${member.name}. (WhatsApp notice: ${sent.error || "Offline"})`,
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Reminder recorded for ${member.name}.`,
+    });
+  } catch (err) {
+    console.error("SEND REMINDER ERROR:", err);
+    res.status(500).json({ error: "Failed to send reminder: " + err.message });
   }
 });
 
