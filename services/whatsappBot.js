@@ -1,29 +1,35 @@
-const {
-  default: makeWASocket,
-  DisconnectReason,
-  useMultiFileAuthState,
-  fetchLatestBaileysVersion,
-  Browsers,
-} = require("@whiskeysockets/baileys");
-const pino = require("pino");
 const QRCode = require("qrcode");
 const path = require("path");
 const fs = require("fs");
 const pool = require("../db");
 
+// Dynamic Baileys references
+let makeWASocket = null;
+let DisconnectReason = null;
+let useMultiFileAuthState = null;
+let fetchLatestBaileysVersion = null;
+let Browsers = null;
+
+function loadBaileysDependencies() {
+  if (!makeWASocket) {
+    try {
+      const baileys = require("@whiskeysockets/baileys");
+      makeWASocket = baileys.default || baileys.makeWASocket || baileys;
+      DisconnectReason = baileys.DisconnectReason;
+      useMultiFileAuthState = baileys.useMultiFileAuthState;
+      fetchLatestBaileysVersion = baileys.fetchLatestBaileysVersion;
+      Browsers = baileys.Browsers;
+    } catch (err) {
+      console.warn("[WhatsAppBot] Baileys dynamic import notice:", err.message);
+    }
+  }
+  return Boolean(makeWASocket);
+}
+
 // Session storage directory
-const isProd = process.env.VERCEL || process.env.NODE_ENV === "production";
-const authDir = isProd
+const authDir = process.env.VERCEL
   ? path.join("/tmp", "baileys_auth_hsy")
   : path.join(__dirname, "..", "auth_info_baileys");
-
-if (!fs.existsSync(authDir)) {
-  try {
-    fs.mkdirSync(authDir, { recursive: true });
-  } catch (e) {
-    console.warn("[WhatsAppBot] Auth directory init warning:", e.message);
-  }
-}
 
 // Global state
 let sock = null;
@@ -62,18 +68,44 @@ async function initWhatsApp(forceNew = false) {
     return { status: connectionStatus, connectedPhoneNumber };
   }
 
+  const loaded = loadBaileysDependencies();
+  if (!loaded) {
+    return {
+      status: "DISCONNECTED",
+      error: "WhatsApp gateway runtime library not loaded in this environment.",
+    };
+  }
+
   try {
+    if (!fs.existsSync(authDir)) {
+      try {
+        fs.mkdirSync(authDir, { recursive: true });
+      } catch (e) {}
+    }
+
     console.log("[WhatsAppBot] Initializing WhatsApp multi-file auth session...");
     connectionStatus = "CONNECTING";
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
-    const { version } = await fetchLatestBaileysVersion();
+    let version;
+    try {
+      const v = await fetchLatestBaileysVersion();
+      version = v.version;
+    } catch (e) {
+      version = [2, 3000, 1015901307];
+    }
+
+    let pinoLogger;
+    try {
+      const pino = require("pino");
+      pinoLogger = pino({ level: "silent" });
+    } catch (e) {}
 
     sock = makeWASocket({
       version,
       auth: state,
       printQRInTerminal: false,
-      logger: pino({ level: "silent" }),
-      browser: Browsers.macOS("Desktop"),
+      logger: pinoLogger || { level: () => {}, info: () => {}, error: () => {}, warn: () => {}, debug: () => {}, trace: () => {}, child: () => ({ level: () => {}, info: () => {}, error: () => {}, warn: () => {}, debug: () => {}, trace: () => {} }) },
+      browser: Browsers ? Browsers.macOS("Desktop") : ["Hindu Swaraj Youth", "Desktop", "1.0.0"],
       syncFullHistory: false,
       markOnlineOnConnect: true,
       generateHighQualityLinkPreview: true,
@@ -117,13 +149,13 @@ async function initWhatsApp(forceNew = false) {
 
       if (connection === "close") {
         const statusCode = lastDisconnect?.error?.output?.statusCode;
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-        console.log(`🔴 [WhatsAppBot] Connection closed due to:`, lastDisconnect?.error?.message || statusCode);
+        const shouldReconnect = statusCode !== DisconnectReason?.loggedOut;
+        console.log(`🔴 [WhatsAppBot] Connection closed:`, lastDisconnect?.error?.message || statusCode);
 
         connectionStatus = "DISCONNECTED";
         connectedPhoneNumber = "";
 
-        if (statusCode === DisconnectReason.loggedOut) {
+        if (statusCode === DisconnectReason?.loggedOut) {
           console.log("⚠️ [WhatsAppBot] Device logged out. Clearing auth credentials...");
           try {
             fs.rmSync(authDir, { recursive: true, force: true });
@@ -351,7 +383,6 @@ async function broadcastEmergencyBloodAlertWhatsApp(sosRecord) {
       } catch (e) {
         console.error(`WhatsApp send error for ${phone10}:`, e.message);
       }
-      // Pacing delay (1.2 seconds) to avoid spam triggers
       await new Promise((r) => setTimeout(r, 1200));
     }
 
