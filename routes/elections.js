@@ -1594,4 +1594,114 @@ router.post("/apply-roles", verifyToken, requireSuperAdmin, async (req, res) => 
   }
 });
 
+/* =========================================================================
+   🔄 17. RESET CAST VOTES & RE-OPEN POLLING (FOR REPEATED TESTING)
+   POST /elections/reset-votes
+========================================================================= */
+router.post("/reset-votes", verifyToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { election_id } = req.body;
+    let targetElectionId = election_id;
+    if (!targetElectionId) {
+      const latestCycle = await pool.query(`SELECT id FROM election_cycles ORDER BY id DESC LIMIT 1`);
+      if (latestCycle.rows.length === 0) {
+        return res.status(404).json({ success: false, error: "No active election cycle found to reset votes." });
+      }
+      targetElectionId = latestCycle.rows[0].id;
+    }
+
+    // 1. Delete all cast votes in secret ballot table
+    await pool.query(`DELETE FROM election_ballot_votes WHERE election_id = $1`, [targetElectionId]);
+
+    // 2. Delete declared results
+    await pool.query(`DELETE FROM election_results WHERE election_id = $1`, [targetElectionId]);
+
+    // 3. Reset voter rolls: has_voted = false, voted_at = null, voting_otp = null
+    await pool.query(
+      `UPDATE election_voter_roll 
+       SET has_voted = false, voted_at = NULL, voting_otp = NULL 
+       WHERE election_id = $1`,
+      [targetElectionId]
+    );
+
+    // 4. Reset nominations status back to ACCEPTED (for any that were marked ELECTED / DEFEATED / ELECTED_UNOPPOSED)
+    await pool.query(
+      `UPDATE election_nominations 
+       SET status = 'ACCEPTED' 
+       WHERE election_id = $1 AND status IN ('ELECTED', 'DEFEATED', 'ELECTED_UNOPPOSED')`,
+      [targetElectionId]
+    );
+
+    // 5. Reset election cycle status back to POLLING_ACTIVE
+    const upd = await pool.query(
+      `UPDATE election_cycles 
+       SET status = 'POLLING_ACTIVE', results_date = NULL 
+       WHERE id = $1 
+       RETURNING *`,
+      [targetElectionId]
+    );
+
+    await logAudit(req.user.id, "ELECTION_VOTES_RESET", { election_id: targetElectionId }, req.ip);
+
+    res.json({
+      success: true,
+      message: "🗳️ All cast votes and voter records cleared! Polling is now ACTIVE for fresh testing.",
+      data: upd.rows[0],
+    });
+  } catch (err) {
+    console.error("RESET VOTES ERROR:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* =========================================================================
+   💥 18. RESET ALL ELECTION DATA (WIPES CYCLES & STARTS 100% FRESH SLATE)
+   POST /elections/reset-all
+========================================================================= */
+router.post("/reset-all", verifyToken, requireSuperAdmin, async (req, res) => {
+  try {
+    await pool.query(`DELETE FROM election_results`);
+    await pool.query(`DELETE FROM election_ballot_votes`);
+    await pool.query(`DELETE FROM election_voter_roll`);
+    await pool.query(`DELETE FROM election_nominations`);
+    await pool.query(`DELETE FROM election_posts`);
+    await pool.query(`DELETE FROM election_commission`);
+    try {
+      await pool.query(`DELETE FROM election_audit_vouchers`);
+    } catch (e) {}
+    await pool.query(`DELETE FROM election_audit_reports`);
+    await pool.query(`DELETE FROM election_audit_committee`);
+    await pool.query(`DELETE FROM election_cycles`);
+
+    await logAudit(req.user.id, "ELECTION_SYSTEM_RESET_ALL", {}, req.ip);
+
+    res.json({
+      success: true,
+      message: "🧹 All election cycles, audit records, nominations, votes, and results have been completely cleared! You can now initiate a new election cycle.",
+    });
+  } catch (err) {
+    console.error("RESET ALL ELECTIONS ERROR:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* =========================================================================
+   🗑️ 19. DELETE INDIVIDUAL ELECTION CYCLE
+   DELETE /elections/cycle/:id
+========================================================================= */
+router.delete("/cycle/:id", verifyToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query(`DELETE FROM election_cycles WHERE id = $1`, [id]);
+    await logAudit(req.user.id, "ELECTION_CYCLE_DELETED", { election_id: id }, req.ip);
+    res.json({
+      success: true,
+      message: `🗑️ Election cycle #${id} deleted successfully.`,
+    });
+  } catch (err) {
+    console.error("DELETE ELECTION CYCLE ERROR:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
