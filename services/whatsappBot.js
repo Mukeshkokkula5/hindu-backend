@@ -1,12 +1,3 @@
-const Baileys = require("@whiskeysockets/baileys");
-const makeWASocket = Baileys.default || Baileys.makeWASocket || Baileys;
-const {
-  DisconnectReason,
-  useMultiFileAuthState,
-  fetchLatestBaileysVersion,
-  Browsers,
-} = Baileys;
-const pino = require("pino");
 const QRCode = require("qrcode");
 const path = require("path");
 const fs = require("fs");
@@ -16,12 +7,6 @@ const pool = require("../db");
 const authDir = process.env.VERCEL
   ? path.join("/tmp", "baileys_auth_hsy")
   : path.join(__dirname, "..", "auth_info_baileys");
-
-if (!fs.existsSync(authDir)) {
-  try {
-    fs.mkdirSync(authDir, { recursive: true });
-  } catch (e) {}
-}
 
 // Global state
 let sock = null;
@@ -34,43 +19,162 @@ let lastConnectedAt = null;
 let isReconnecting = false;
 
 /**
- * Clean and format phone number to international WhatsApp JID
- * e.g. "98480 12345" -> "919848012345@s.whatsapp.net"
+ * Format phone number to 91XXXXXXXXXX
  */
-function formatToWhatsAppJid(phone) {
+function cleanPhoneNumber(phone) {
   if (!phone) return null;
   let digits = String(phone).replace(/\D/g, "");
   if (digits.length === 10) {
     digits = "91" + digits;
-  } else if (digits.length === 12 && digits.startsWith("91")) {
-    // already 91
   } else if (digits.length === 11 && digits.startsWith("0")) {
     digits = "91" + digits.slice(1);
   }
   if (digits.length < 10) return null;
-  return `${digits}@s.whatsapp.net`;
+  return digits;
 }
 
 /**
- * Initialize Baileys WhatsApp Socket & await QR code generation
+ * Format phone to WhatsApp JID for Baileys
+ */
+function formatToWhatsAppJid(phone) {
+  const clean = cleanPhoneNumber(phone);
+  if (!clean) return null;
+  return `${clean}@s.whatsapp.net`;
+}
+
+/**
+ * 🌟 1. SEND VIA OFFICIAL META CLOUD API (HTTP REST)
+ */
+async function sendViaMetaCloudAPI(phone, messageText) {
+  const token = process.env.WHATSAPP_TOKEN || process.env.META_WHATSAPP_TOKEN;
+  const phoneId = process.env.WHATSAPP_PHONE_ID || process.env.META_PHONE_ID;
+
+  if (!token || !phoneId) {
+    return { success: false, error: "Meta WhatsApp API credentials not set in environment." };
+  }
+
+  const cleanPhone = cleanPhoneNumber(phone);
+  if (!cleanPhone) {
+    return { success: false, error: `Invalid phone format: ${phone}` };
+  }
+
+  try {
+    const res = await fetch(`https://graph.facebook.com/v19.0/${phoneId}/messages`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: cleanPhone,
+        type: "text",
+        text: { preview_url: true, body: messageText.trim() },
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      console.error("❌ [MetaCloudAPI] Send Error:", data.error || data);
+      return { success: false, error: data.error?.message || "Meta API error" };
+    }
+
+    console.log(`💬 [MetaCloudAPI] Message delivered to ${cleanPhone} (MsgId: ${data.messages?.[0]?.id})`);
+    return {
+      success: true,
+      messageId: data.messages?.[0]?.id,
+      provider: "META_CLOUD_API",
+    };
+  } catch (err) {
+    console.error("❌ [MetaCloudAPI] Network error:", err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * ⚡ 2. SEND VIA BAILEYS WEBSOCKET
+ */
+async function sendViaBaileys(phone, messageText) {
+  if (!sock || connectionStatus !== "CONNECTED") {
+    return { success: false, error: "Baileys gateway is offline." };
+  }
+
+  const jid = formatToWhatsAppJid(phone);
+  if (!jid) return { success: false, error: "Invalid phone number." };
+
+  try {
+    const sent = await sock.sendMessage(jid, { text: messageText.trim() });
+    console.log(`💬 [Baileys] Message sent to ${phone} (ID: ${sent?.key?.id})`);
+    return {
+      success: true,
+      messageId: sent?.key?.id,
+      recipient: jid,
+      provider: "BAILEYS_SOCKET",
+    };
+  } catch (err) {
+    console.error(`❌ [Baileys] Send error to ${phone}:`, err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * 🚀 3. UNIFIED DIRECT WHATSAPP SENDER (Attempts Cloud API first, then Baileys)
+ */
+async function sendDirectWhatsApp(phone, textMessage) {
+  // Try Meta Cloud API if configured
+  if (process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_ID) {
+    const metaRes = await sendViaMetaCloudAPI(phone, textMessage);
+    if (metaRes.success) return metaRes;
+  }
+
+  // Fallback to Baileys if connected
+  if (sock && connectionStatus === "CONNECTED") {
+    return await sendViaBaileys(phone, textMessage);
+  }
+
+  return {
+    success: false,
+    error: "WhatsApp gateway is not connected. Please scan QR or configure WhatsApp API.",
+  };
+}
+
+/**
+ * Initialize Baileys WhatsApp Socket
  */
 async function initWhatsApp(forceNew = false) {
+  // If Meta Cloud API is set, we are always connected via Cloud API
+  if (process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_ID) {
+    return {
+      status: "CONNECTED",
+      isConnected: true,
+      provider: "META_CLOUD_API",
+      connectedPhoneNumber: process.env.WHATSAPP_DISPLAY_PHONE || "+91 8499878425",
+    };
+  }
+
   if (sock && connectionStatus === "CONNECTED" && !forceNew) {
     return {
       status: connectionStatus,
       isConnected: true,
+      provider: "BAILEYS_SOCKET",
       connectedPhoneNumber,
       lastConnectedAt,
     };
   }
 
-  if (forceNew && sock) {
-    try {
-      sock.end();
-      sock = null;
-    } catch (e) {}
+  // If running in serverless Vercel environment where WebSockets cannot persist
+  if (process.env.VERCEL) {
+    return {
+      status: "DISCONNECTED",
+      isConnected: false,
+      isServerless: true,
+      message: "Vercel Serverless environment detected. Connect via Meta Cloud API or Dedicated Node Server for background WhatsApp.",
+      qrCodeDataUrl: null,
+    };
   }
 
+  // Local / Long-running Node.js Server: Initialize Baileys
   return new Promise(async (resolve) => {
     let hasResolved = false;
 
@@ -84,26 +188,53 @@ async function initWhatsApp(forceNew = false) {
           connectedPhoneNumber,
         });
       }
-    }, 7500);
+    }, 6000);
 
     try {
+      let Baileys;
+      try {
+        Baileys = require("@whiskeysockets/baileys");
+      } catch (reqErr) {
+        console.warn("Baileys require notice:", reqErr.message);
+        if (!hasResolved) {
+          hasResolved = true;
+          clearTimeout(timeout);
+          return resolve({ status: "DISCONNECTED", isConnected: false, error: "Baileys not installed" });
+        }
+      }
+
+      const makeWASocket = Baileys.default || Baileys.makeWASocket || Baileys;
+      const { DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, Browsers } = Baileys;
+
+      if (!fs.existsSync(authDir)) {
+        try {
+          fs.mkdirSync(authDir, { recursive: true });
+        } catch (e) {}
+      }
+
       connectionStatus = "CONNECTING";
       const { state, saveCreds } = await useMultiFileAuthState(authDir);
+
       let version = [2, 3000, 1015901307];
       try {
         const v = await fetchLatestBaileysVersion();
         if (v && v.version) version = v.version;
       } catch (e) {}
 
+      let pinoLogger;
+      try {
+        const pino = require("pino");
+        pinoLogger = pino({ level: "silent" });
+      } catch (e) {}
+
       sock = makeWASocket({
         version,
         auth: state,
         printQRInTerminal: false,
-        logger: pino({ level: "silent" }),
-        browser: Browsers ? Browsers.macOS("Desktop") : ["Hindu Swaraj Youth", "Desktop", "1.0.0"],
+        logger: pinoLogger || { level: () => {}, info: () => {}, error: () => {}, warn: () => {}, debug: () => {}, trace: () => {}, child: () => ({ level: () => {}, info: () => {}, error: () => {}, warn: () => {}, debug: () => {}, trace: () => {} }) },
+        browser: Browsers ? Browsers.macOS("Desktop") : ["Hindu Swaraj", "Desktop", "1.0.0"],
         syncFullHistory: false,
         markOnlineOnConnect: true,
-        generateHighQualityLinkPreview: true,
       });
 
       sock.ev.on("creds.update", saveCreds);
@@ -120,7 +251,7 @@ async function initWhatsApp(forceNew = false) {
               color: { dark: "#7f1d1d", light: "#ffffff" },
             });
             connectionStatus = "SCAN_QR_CODE";
-            console.log("📲 [WhatsAppBot] New QR code generated successfully!");
+            console.log("📲 [WhatsAppBot] New QR code ready!");
 
             if (!hasResolved) {
               hasResolved = true;
@@ -131,9 +262,7 @@ async function initWhatsApp(forceNew = false) {
                 qrCodeDataUrl,
               });
             }
-          } catch (qrErr) {
-            console.error("[WhatsAppBot] QR Error:", qrErr.message);
-          }
+          } catch (qrErr) {}
         }
 
         if (connection === "connecting") {
@@ -148,7 +277,7 @@ async function initWhatsApp(forceNew = false) {
 
           connectedUserJid = sock.user?.id || "";
           connectedPhoneNumber = connectedUserJid.split(":")[0] || connectedUserJid.split("@")[0] || "";
-          console.log(`✅ [WhatsAppBot] WhatsApp Gateway Connected: ${connectedPhoneNumber}`);
+          console.log(`✅ [WhatsAppBot] Connected: ${connectedPhoneNumber}`);
 
           if (!hasResolved) {
             hasResolved = true;
@@ -164,13 +293,12 @@ async function initWhatsApp(forceNew = false) {
 
         if (connection === "close") {
           const statusCode = lastDisconnect?.error?.output?.statusCode;
-          const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-          console.log("🔴 [WhatsAppBot] Connection closed:", lastDisconnect?.error?.message || statusCode);
+          const shouldReconnect = statusCode !== DisconnectReason?.loggedOut;
 
           connectionStatus = "DISCONNECTED";
           connectedPhoneNumber = "";
 
-          if (statusCode === DisconnectReason.loggedOut) {
+          if (statusCode === DisconnectReason?.loggedOut) {
             try {
               fs.rmSync(authDir, { recursive: true, force: true });
             } catch (rmErr) {}
@@ -184,7 +312,7 @@ async function initWhatsApp(forceNew = false) {
         }
       });
     } catch (err) {
-      console.error("[WhatsAppBot] Init Socket Error:", err);
+      console.error("[WhatsAppBot] Init Error:", err.message);
       connectionStatus = "DISCONNECTED";
       if (!hasResolved) {
         hasResolved = true;
@@ -196,44 +324,7 @@ async function initWhatsApp(forceNew = false) {
 }
 
 /**
- * Send Direct WhatsApp Text Message
- */
-async function sendDirectWhatsApp(phone, textMessage) {
-  try {
-    if (!sock || connectionStatus !== "CONNECTED") {
-      return {
-        success: false,
-        error: "WhatsApp gateway is not connected. Please scan the QR code in Admin Dashboard.",
-      };
-    }
-
-    const jid = formatToWhatsAppJid(phone);
-    if (!jid) {
-      return {
-        success: false,
-        error: `Invalid phone number format: ${phone}`,
-      };
-    }
-
-    const sent = await sock.sendMessage(jid, { text: textMessage.trim() });
-    console.log(`💬 [WhatsAppBot] Message sent to ${phone} (JID: ${jid}, ID: ${sent?.key?.id})`);
-
-    return {
-      success: true,
-      messageId: sent?.key?.id,
-      recipient: jid,
-    };
-  } catch (err) {
-    console.error(`❌ [WhatsAppBot] Failed to send message to ${phone}:`, err.message);
-    return {
-      success: false,
-      error: err.message,
-    };
-  }
-}
-
-/**
- * Logout & Reset WhatsApp Auth Session
+ * Logout WhatsApp
  */
 async function logoutWhatsApp() {
   try {
@@ -249,34 +340,44 @@ async function logoutWhatsApp() {
     try {
       fs.rmSync(authDir, { recursive: true, force: true });
     } catch (e) {}
-    console.log("🔒 [WhatsAppBot] Successfully logged out and reset WhatsApp session.");
     return { success: true, message: "WhatsApp session disconnected." };
   } catch (err) {
-    console.error("[WhatsAppBot] Logout error:", err);
     return { success: false, error: err.message };
   }
 }
 
 /**
- * Get Current Status Info
+ * Get Status Info
  */
 function getWhatsAppStatus() {
+  const isCloudAPI = Boolean(process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_ID);
+
+  if (isCloudAPI) {
+    return {
+      status: "CONNECTED",
+      isConnected: true,
+      provider: "META_CLOUD_API",
+      connectedPhoneNumber: process.env.WHATSAPP_DISPLAY_PHONE || "+91 8499878425",
+      lastConnectedAt: new Date().toISOString(),
+      qrCodeDataUrl: null,
+    };
+  }
+
   return {
     status: connectionStatus,
     isConnected: connectionStatus === "CONNECTED",
+    provider: "BAILEYS_SOCKET",
     qrCodeDataUrl: qrCodeDataUrl || null,
     connectedPhoneNumber,
     lastConnectedAt,
+    isServerless: Boolean(process.env.VERCEL),
   };
 }
 
 /* =====================================================
-   🎨 PROFESSIONAL WHATSAPP TEMPLATE GENERATORS
+   🎨 PROFESSIONAL WHATSAPP TEMPLATES
 ===================================================== */
 
-/**
- * 🚨 Template 1: Emergency Blood SOS Alert
- */
 function buildEmergencyBloodWhatsAppTemplate(sos) {
   const patient = sos.patient_name || "Emergency Patient";
   const bg = sos.blood_group || "O+";
@@ -304,9 +405,6 @@ function buildEmergencyBloodWhatsAppTemplate(sos) {
 _హిందూ స్వరాజ్ యూత్ వెల్ఫేర్ అసోసియేషన్ (Regd. No: 784/2025)_`;
 }
 
-/**
- * 💳 Template 2: Monthly Subscription Dues Reminder
- */
 function buildSubscriptionReminderWhatsAppTemplate({ name, monthYear, dueAmount, role }) {
   const amount = dueAmount || 216;
   const targetMonth = monthYear || "Current Month";
@@ -333,9 +431,6 @@ function buildSubscriptionReminderWhatsAppTemplate({ name, monthYear, dueAmount,
 *కార్యనిర్వాహక వర్గం, హిందూ స్వరాజ్ అసోసియేషన్*`;
 }
 
-/**
- * 🧾 Template 3: Payment Receipt Confirmation
- */
 function buildPaymentReceiptWhatsAppTemplate({ name, receiptNo, monthYear, amount, paymentMode, paidDate, receiptToken }) {
   return `🧾 *OFFICIAL PAYMENT RECEIPT & APPRECIATION* 🧾
 *HINDU SWARAJ YOUTH WELFARE ASSOCIATION*
@@ -359,15 +454,7 @@ _మీ నిరంతర తోడ్పాటుకు హృదయపూర�
 _హిందూ స్వరాజ్ యూత్ వెల్ఫేర్ అసోసియేషన్ (Regd. No: 784/2025)_`;
 }
 
-/**
- * 🚀 Broadcast Emergency Blood Alert to All Members & Volunteers via WhatsApp
- */
 async function broadcastEmergencyBloodAlertWhatsApp(sosRecord) {
-  if (!sock || connectionStatus !== "CONNECTED") {
-    console.warn("[WhatsAppBot] Cannot broadcast SOS: WhatsApp Gateway is not connected.");
-    return { success: false, error: "WhatsApp Gateway is not connected.", dispatchedCount: 0 };
-  }
-
   try {
     const [usersResult, volResult] = await Promise.all([
       pool.query("SELECT id, name, phone FROM users WHERE phone IS NOT NULL AND phone != ''"),
@@ -377,35 +464,30 @@ async function broadcastEmergencyBloodAlertWhatsApp(sosRecord) {
     const targetPhones = new Map();
 
     usersResult.rows.forEach((u) => {
-      const clean = (u.phone || "").replace(/\D/g, "");
-      if (clean.length >= 10) targetPhones.set(clean.slice(-10), { name: u.name, type: "MEMBER" });
+      const clean = cleanPhoneNumber(u.phone);
+      if (clean && clean.length >= 10) targetPhones.set(clean.slice(-10), { name: u.name, type: "MEMBER" });
     });
 
     volResult.rows.forEach((v) => {
-      const clean = (v.phone || "").replace(/\D/g, "");
-      if (clean.length >= 10 && !targetPhones.has(clean.slice(-10))) {
+      const clean = cleanPhoneNumber(v.phone);
+      if (clean && clean.length >= 10 && !targetPhones.has(clean.slice(-10))) {
         targetPhones.set(clean.slice(-10), { name: v.name, type: "VOLUNTEER" });
       }
     });
 
     const msgText = buildEmergencyBloodWhatsAppTemplate(sosRecord);
-    console.log(`🚨 [WhatsAppBot] Broadcasting Emergency Blood SOS to ${targetPhones.size} phone numbers...`);
-
     let sentCount = 0;
+
     for (const [phone10] of targetPhones) {
       try {
         const res = await sendDirectWhatsApp(`91${phone10}`, msgText);
         if (res.success) sentCount++;
-      } catch (e) {
-        console.error(`WhatsApp send error for ${phone10}:`, e.message);
-      }
-      await new Promise((r) => setTimeout(r, 1200));
+      } catch (e) {}
+      await new Promise((r) => setTimeout(r, 1000));
     }
 
-    console.log(`✅ [WhatsAppBot] Successfully broadcasted WhatsApp SOS to ${sentCount}/${targetPhones.size} members.`);
     return { success: true, dispatchedCount: sentCount, totalTargets: targetPhones.size };
   } catch (err) {
-    console.error("[WhatsAppBot] Broadcast SOS error:", err);
     return { success: false, error: err.message, dispatchedCount: 0 };
   }
 }
