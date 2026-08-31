@@ -784,10 +784,11 @@ router.post("/wishes", async (req, res) => {
       await sendNavaratriPoojaReceiptWhatsApp({
         devotee_name: devotee_name.trim(),
         token_no,
-        seva_type: seva_type || "నిత్య పూజ & మహామంగళ హారతి",
-        amount: amount || 0,
-        gotram: gotram ? gotram.trim() : "",
-        phone_number: phone_number ? phone_number.trim() : "",
+        seva_type: numOffering > 0 ? `శ్రీ వినాయక దివ్య కానుక సేవ (₹${numOffering.toLocaleString("en-IN")})` : "శ్రీ వినాయక నిత్య సహస్రనామార్చన & సంకల్ప పూజ",
+        amount: numOffering || 0,
+        gotram: gotram ? gotram.trim() : "శివ / కాశ్యప గోత్రం",
+        mobile: cleanMobile,
+        phone: cleanMobile,
       });
     } catch (waErr) {
       console.warn("Devotional WhatsApp notice:", waErr.message);

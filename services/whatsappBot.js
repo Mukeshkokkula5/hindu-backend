@@ -740,16 +740,16 @@ async function sendVolunteerWelcomeWhatsApp(volunteer) {
 
 async function sendNavaratriPoojaReceiptWhatsApp(devotee) {
   try {
-    const phone = devotee.phone_number || devotee.phone;
+    const phone = devotee.mobile || devotee.phone_number || devotee.phone || devotee.cleanMobile;
     if (!phone) return { success: false, error: "No phone" };
     const clean = cleanPhoneNumber(phone);
     if (!clean) return { success: false, error: "Invalid phone" };
 
     const msg = buildNavaratriSevaWhatsAppTemplate({
-      devoteeName: devotee.devotee_name,
+      devoteeName: devotee.devotee_name || devotee.name,
       tokenNo: devotee.token_no,
-      sevaName: devotee.seva_type,
-      amount: devotee.amount,
+      sevaName: devotee.seva_type || devotee.sevaName,
+      amount: devotee.amount || devotee.offering_amount,
       gotram: devotee.gotram,
       certUrl: `https://hinduswarajyouth.online/vinayaka-navaratri?token=${devotee.token_no}`,
     });
