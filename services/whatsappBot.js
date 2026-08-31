@@ -1,35 +1,27 @@
+const Baileys = require("@whiskeysockets/baileys");
+const makeWASocket = Baileys.default || Baileys.makeWASocket || Baileys;
+const {
+  DisconnectReason,
+  useMultiFileAuthState,
+  fetchLatestBaileysVersion,
+  Browsers,
+} = Baileys;
+const pino = require("pino");
 const QRCode = require("qrcode");
 const path = require("path");
 const fs = require("fs");
 const pool = require("../db");
 
-// Dynamic Baileys references
-let makeWASocket = null;
-let DisconnectReason = null;
-let useMultiFileAuthState = null;
-let fetchLatestBaileysVersion = null;
-let Browsers = null;
-
-function loadBaileysDependencies() {
-  if (!makeWASocket) {
-    try {
-      const baileys = require("@whiskeysockets/baileys");
-      makeWASocket = baileys.default || baileys.makeWASocket || baileys;
-      DisconnectReason = baileys.DisconnectReason;
-      useMultiFileAuthState = baileys.useMultiFileAuthState;
-      fetchLatestBaileysVersion = baileys.fetchLatestBaileysVersion;
-      Browsers = baileys.Browsers;
-    } catch (err) {
-      console.warn("[WhatsAppBot] Baileys dynamic import notice:", err.message);
-    }
-  }
-  return Boolean(makeWASocket);
-}
-
 // Session storage directory
 const authDir = process.env.VERCEL
   ? path.join("/tmp", "baileys_auth_hsy")
   : path.join(__dirname, "..", "auth_info_baileys");
+
+if (!fs.existsSync(authDir)) {
+  try {
+    fs.mkdirSync(authDir, { recursive: true });
+  } catch (e) {}
+}
 
 // Global state
 let sock = null;
@@ -60,123 +52,147 @@ function formatToWhatsAppJid(phone) {
 }
 
 /**
- * Initialize Baileys WhatsApp Socket
+ * Initialize Baileys WhatsApp Socket & await QR code generation
  */
 async function initWhatsApp(forceNew = false) {
   if (sock && connectionStatus === "CONNECTED" && !forceNew) {
-    console.log("[WhatsAppBot] Already connected.");
-    return { status: connectionStatus, connectedPhoneNumber };
-  }
-
-  const loaded = loadBaileysDependencies();
-  if (!loaded) {
     return {
-      status: "DISCONNECTED",
-      error: "WhatsApp gateway runtime library not loaded in this environment.",
+      status: connectionStatus,
+      isConnected: true,
+      connectedPhoneNumber,
+      lastConnectedAt,
     };
   }
 
-  try {
-    if (!fs.existsSync(authDir)) {
-      try {
-        fs.mkdirSync(authDir, { recursive: true });
-      } catch (e) {}
-    }
-
-    console.log("[WhatsAppBot] Initializing WhatsApp multi-file auth session...");
-    connectionStatus = "CONNECTING";
-    const { state, saveCreds } = await useMultiFileAuthState(authDir);
-    let version;
+  if (forceNew && sock) {
     try {
-      const v = await fetchLatestBaileysVersion();
-      version = v.version;
-    } catch (e) {
-      version = [2, 3000, 1015901307];
-    }
-
-    let pinoLogger;
-    try {
-      const pino = require("pino");
-      pinoLogger = pino({ level: "silent" });
+      sock.end();
+      sock = null;
     } catch (e) {}
-
-    sock = makeWASocket({
-      version,
-      auth: state,
-      printQRInTerminal: false,
-      logger: pinoLogger || { level: () => {}, info: () => {}, error: () => {}, warn: () => {}, debug: () => {}, trace: () => {}, child: () => ({ level: () => {}, info: () => {}, error: () => {}, warn: () => {}, debug: () => {}, trace: () => {} }) },
-      browser: Browsers ? Browsers.macOS("Desktop") : ["Hindu Swaraj Youth", "Desktop", "1.0.0"],
-      syncFullHistory: false,
-      markOnlineOnConnect: true,
-      generateHighQualityLinkPreview: true,
-    });
-
-    sock.ev.on("creds.update", saveCreds);
-
-    sock.ev.on("connection.update", async (update) => {
-      const { connection, lastDisconnect, qr } = update;
-
-      if (qr) {
-        qrCodeRaw = qr;
-        try {
-          qrCodeDataUrl = await QRCode.toDataURL(qr, {
-            margin: 2,
-            scale: 8,
-            color: { dark: "#7f1d1d", light: "#ffffff" },
-          });
-          connectionStatus = "SCAN_QR_CODE";
-          console.log("📲 [WhatsAppBot] New QR code generated. Ready for scanning in Admin Portal!");
-        } catch (qrErr) {
-          console.error("[WhatsAppBot] QR Code generation error:", qrErr.message);
-        }
-      }
-
-      if (connection === "connecting") {
-        connectionStatus = "CONNECTING";
-        console.log("⏳ [WhatsAppBot] Connecting to WhatsApp servers...");
-      }
-
-      if (connection === "open") {
-        connectionStatus = "CONNECTED";
-        qrCodeRaw = "";
-        qrCodeDataUrl = "";
-        lastConnectedAt = new Date().toISOString();
-
-        connectedUserJid = sock.user?.id || "";
-        connectedPhoneNumber = connectedUserJid.split(":")[0] || connectedUserJid.split("@")[0] || "";
-        console.log(`✅ [WhatsAppBot] WhatsApp Gateway Connected! User: ${connectedPhoneNumber}`);
-      }
-
-      if (connection === "close") {
-        const statusCode = lastDisconnect?.error?.output?.statusCode;
-        const shouldReconnect = statusCode !== DisconnectReason?.loggedOut;
-        console.log(`🔴 [WhatsAppBot] Connection closed:`, lastDisconnect?.error?.message || statusCode);
-
-        connectionStatus = "DISCONNECTED";
-        connectedPhoneNumber = "";
-
-        if (statusCode === DisconnectReason?.loggedOut) {
-          console.log("⚠️ [WhatsAppBot] Device logged out. Clearing auth credentials...");
-          try {
-            fs.rmSync(authDir, { recursive: true, force: true });
-          } catch (rmErr) {}
-        } else if (shouldReconnect && !isReconnecting) {
-          isReconnecting = true;
-          console.log("🔄 [WhatsAppBot] Attempting auto-reconnection in 5 seconds...");
-          setTimeout(() => {
-            isReconnecting = false;
-            initWhatsApp();
-          }, 5000);
-        }
-      }
-    });
-
-    return { status: connectionStatus, qrCodeDataUrl };
-  } catch (err) {
-    console.error("[WhatsAppBot] Init error:", err);
-    connectionStatus = "DISCONNECTED";
-    return { status: "ERROR", error: err.message };
   }
+
+  return new Promise(async (resolve) => {
+    let hasResolved = false;
+
+    const timeout = setTimeout(() => {
+      if (!hasResolved) {
+        hasResolved = true;
+        resolve({
+          status: connectionStatus,
+          isConnected: connectionStatus === "CONNECTED",
+          qrCodeDataUrl: qrCodeDataUrl || null,
+          connectedPhoneNumber,
+        });
+      }
+    }, 7500);
+
+    try {
+      connectionStatus = "CONNECTING";
+      const { state, saveCreds } = await useMultiFileAuthState(authDir);
+      let version = [2, 3000, 1015901307];
+      try {
+        const v = await fetchLatestBaileysVersion();
+        if (v && v.version) version = v.version;
+      } catch (e) {}
+
+      sock = makeWASocket({
+        version,
+        auth: state,
+        printQRInTerminal: false,
+        logger: pino({ level: "silent" }),
+        browser: Browsers ? Browsers.macOS("Desktop") : ["Hindu Swaraj Youth", "Desktop", "1.0.0"],
+        syncFullHistory: false,
+        markOnlineOnConnect: true,
+        generateHighQualityLinkPreview: true,
+      });
+
+      sock.ev.on("creds.update", saveCreds);
+
+      sock.ev.on("connection.update", async (update) => {
+        const { connection, lastDisconnect, qr } = update;
+
+        if (qr) {
+          qrCodeRaw = qr;
+          try {
+            qrCodeDataUrl = await QRCode.toDataURL(qr, {
+              margin: 2,
+              scale: 8,
+              color: { dark: "#7f1d1d", light: "#ffffff" },
+            });
+            connectionStatus = "SCAN_QR_CODE";
+            console.log("📲 [WhatsAppBot] New QR code generated successfully!");
+
+            if (!hasResolved) {
+              hasResolved = true;
+              clearTimeout(timeout);
+              resolve({
+                status: "SCAN_QR_CODE",
+                isConnected: false,
+                qrCodeDataUrl,
+              });
+            }
+          } catch (qrErr) {
+            console.error("[WhatsAppBot] QR Error:", qrErr.message);
+          }
+        }
+
+        if (connection === "connecting") {
+          connectionStatus = "CONNECTING";
+        }
+
+        if (connection === "open") {
+          connectionStatus = "CONNECTED";
+          qrCodeRaw = "";
+          qrCodeDataUrl = "";
+          lastConnectedAt = new Date().toISOString();
+
+          connectedUserJid = sock.user?.id || "";
+          connectedPhoneNumber = connectedUserJid.split(":")[0] || connectedUserJid.split("@")[0] || "";
+          console.log(`✅ [WhatsAppBot] WhatsApp Gateway Connected: ${connectedPhoneNumber}`);
+
+          if (!hasResolved) {
+            hasResolved = true;
+            clearTimeout(timeout);
+            resolve({
+              status: "CONNECTED",
+              isConnected: true,
+              connectedPhoneNumber,
+              lastConnectedAt,
+            });
+          }
+        }
+
+        if (connection === "close") {
+          const statusCode = lastDisconnect?.error?.output?.statusCode;
+          const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+          console.log("🔴 [WhatsAppBot] Connection closed:", lastDisconnect?.error?.message || statusCode);
+
+          connectionStatus = "DISCONNECTED";
+          connectedPhoneNumber = "";
+
+          if (statusCode === DisconnectReason.loggedOut) {
+            try {
+              fs.rmSync(authDir, { recursive: true, force: true });
+            } catch (rmErr) {}
+          } else if (shouldReconnect && !isReconnecting) {
+            isReconnecting = true;
+            setTimeout(() => {
+              isReconnecting = false;
+              initWhatsApp();
+            }, 5000);
+          }
+        }
+      });
+    } catch (err) {
+      console.error("[WhatsAppBot] Init Socket Error:", err);
+      connectionStatus = "DISCONNECTED";
+      if (!hasResolved) {
+        hasResolved = true;
+        clearTimeout(timeout);
+        resolve({ status: "ERROR", error: err.message, qrCodeDataUrl: null });
+      }
+    }
+  });
 }
 
 /**
@@ -248,7 +264,7 @@ function getWhatsAppStatus() {
   return {
     status: connectionStatus,
     isConnected: connectionStatus === "CONNECTED",
-    qrCodeDataUrl: connectionStatus === "SCAN_QR_CODE" ? qrCodeDataUrl : null,
+    qrCodeDataUrl: qrCodeDataUrl || null,
     connectedPhoneNumber,
     lastConnectedAt,
   };
