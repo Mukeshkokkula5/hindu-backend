@@ -9,6 +9,17 @@ const { addMemberTemplate, resendLoginTemplate } = require("../utils/emailTempla
 
 const router = express.Router();
 
+function generateRandomMemberPassword() {
+  const prefix = "HSY@";
+  const num = Math.floor(1000 + Math.random() * 9000);
+  const letters = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz";
+  let suffix = "";
+  for (let i = 0; i < 2; i++) {
+    suffix += letters.charAt(Math.floor(Math.random() * letters.length));
+  }
+  return `${prefix}${num}${suffix}`;
+}
+
 /* =====================================================
    1️⃣ GET ALL MEMBERS (USERS TABLE)
 ===================================================== */
@@ -76,7 +87,10 @@ router.post(
         photo_url,
       } = req.body;
 
-      const rawPassword = password || Math.random().toString(36).slice(-8);
+      let rawPassword = (password && typeof password === "string") ? password.trim() : "";
+      if (!rawPassword || rawPassword === "password123") {
+        rawPassword = generateRandomMemberPassword();
+      }
       const hashedPassword = await bcrypt.hash(rawPassword, 10);
 
       const result = await pool.query(
@@ -455,7 +469,7 @@ router.post(
       const hashedPassword = await bcrypt.hash(newPassword, 10);
 
       await pool.query(
-        "UPDATE users SET password=$1, is_first_login=false WHERE id=$2",
+        "UPDATE users SET password=$1, is_first_login=true WHERE id=$2",
         [hashedPassword, id]
       );
 

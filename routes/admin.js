@@ -130,7 +130,7 @@ router.post(
   async (req, res) => {
     const client = await pool.connect();
     try {
-      const { name, personal_email, email, phone, address, role = ROLES.MEMBER } =
+      const { name, personal_email, email, phone, address, role = ROLES.MEMBER, password } =
         req.body;
 
       const targetEmail = personal_email || email;
@@ -143,8 +143,11 @@ router.post(
 
       const memberId = await generateMemberId(client);
       const username = await generateUsername(name);
-      const password = Math.random().toString(36).slice(-8);
-      const hashed = await bcrypt.hash(password, 10);
+      let rawPassword = (password && typeof password === "string") ? password.trim() : "";
+      if (!rawPassword || rawPassword === "password123") {
+        rawPassword = generateRandomMemberPassword();
+      }
+      const hashed = await bcrypt.hash(rawPassword, 10);
 
       const { rows } = await client.query(
         `
@@ -172,7 +175,7 @@ router.post(
         await sendMail(
           targetEmail,
           "Welcome to HSY Association",
-          addMemberTemplate({ name, username, password, memberId })
+          addMemberTemplate({ name, username, password: rawPassword, memberId })
         );
       }
 
@@ -182,8 +185,8 @@ router.post(
         message: "Member added successfully",
         member_id: memberId,
         username,
-        password,
-        tempPassword: password,
+        password: rawPassword,
+        tempPassword: rawPassword,
       });
     } catch (err) {
       await client.query("ROLLBACK");

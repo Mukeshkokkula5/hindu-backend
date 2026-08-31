@@ -128,11 +128,12 @@ router.post("/login", authLimiter, async (req, res) => {
     res.json({
       token,
       role: user.role,
-      isFirstLogin: user.is_first_login,
+      isFirstLogin: Boolean(user.is_first_login),
       user: {
         id: user.id,
         name: user.name,
         username: user.username,
+        is_first_login: Boolean(user.is_first_login),
       },
     });
   } catch (err) {
@@ -619,6 +620,73 @@ router.post("/change-password", verifyToken, authLimiter, async (req, res) => {
   } catch (err) {
     console.error("CHANGE PASSWORD ERROR 👉", err);
     res.status(500).json({ error: "Server error while changing password" });
+  }
+});
+
+/* =====================================================
+   🔑 FIRST LOGIN MANDATORY PASSWORD CHANGE
+   POST /auth/first-login-change-password
+===================================================== */
+router.post("/first-login-change-password", verifyToken, async (req, res) => {
+  try {
+    const { oldPassword, newPassword } = req.body;
+
+    if (!oldPassword || !newPassword) {
+      return res.status(400).json({ error: "Current temporary password and new password are required" });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: "New password must be at least 6 characters long" });
+    }
+
+    if (oldPassword === newPassword) {
+      return res.status(400).json({ error: "New password must be different from the temporary password" });
+    }
+
+    const userResult = await pool.query(
+      "SELECT id, name, username, personal_email, password FROM users WHERE id=$1",
+      [req.user.id]
+    );
+
+    if (!userResult.rowCount) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const user = userResult.rows[0];
+
+    // Verify current temporary password
+    const isOldMatch = await bcrypt.compare(oldPassword, user.password);
+    if (!isOldMatch) {
+      return res.status(401).json({ error: "Current temporary password is incorrect. Please verify and try again." });
+    }
+
+    // Hash and update
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await pool.query(
+      "UPDATE users SET password=$1, is_first_login=false WHERE id=$2",
+      [hashed, user.id]
+    );
+
+    // Send confirmation email
+    if (user.personal_email) {
+      await sendMail(
+        user.personal_email,
+        "Your New HSY Association Password is Set 🔐",
+        passwordResetSuccessTemplate({ name: user.name })
+      ).catch((e) => console.warn("Email notice warning:", e.message));
+    }
+
+    try {
+      await logAudit("FIRST_LOGIN_CHANGE_PASSWORD", "USER", user.id, user.id);
+    } catch (_) {}
+
+    res.json({
+      success: true,
+      message: "Personal password set successfully! Welcome to Hindu Swaraj Youth portal. 🚀",
+    });
+  } catch (err) {
+    console.error("FIRST LOGIN CHANGE PASSWORD ERROR 👉", err);
+    res.status(500).json({ error: "Failed to update password: " + err.message });
   }
 });
 

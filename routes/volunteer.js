@@ -13,6 +13,17 @@ const {
 
 const router = express.Router();
 
+function generateRandomMemberPassword() {
+  const prefix = "HSY@";
+  const num = Math.floor(1000 + Math.random() * 9000);
+  const letters = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz";
+  let suffix = "";
+  for (let i = 0; i < 2; i++) {
+    suffix += letters.charAt(Math.floor(Math.random() * letters.length));
+  }
+  return `${prefix}${num}${suffix}`;
+}
+
 // Role Constants
 const ADMIN_WRITE_ROLES = ["SUPER_ADMIN", "PRESIDENT"];
 const VIEW_ALL_ROLES = [
@@ -369,7 +380,7 @@ router.post(
 
       const memberId = await generateMemberId(client);
       const username = await generateUsername(vol.name);
-      const password = Math.random().toString(36).slice(-8);
+      const password = generateRandomMemberPassword();
       const hashed = await bcrypt.hash(password, 10);
 
       const userRes = await client.query(
