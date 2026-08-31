@@ -49,6 +49,14 @@ module.exports = async function sendReceiptEmail(donation) {
       ]
     );
 
+    // 📱 Automated WhatsApp Receipt Dispatch
+    try {
+      const { sendDonationReceiptWhatsApp } = require("../services/whatsappBot");
+      await sendDonationReceiptWhatsApp(donation);
+    } catch (waErr) {
+      console.warn("WhatsApp receipt notice:", waErr.message);
+    }
+
     return true;
   } catch (err) {
     console.error("❌ SEND RECEIPT EMAIL FAILED:", err.message);

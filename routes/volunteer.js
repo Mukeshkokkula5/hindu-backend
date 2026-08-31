@@ -162,9 +162,23 @@ router.post("/register", async (req, res) => {
       ).catch((err) => console.error("Volunteer Email Error 👉", err.message));
     }
 
+    // Send automated WhatsApp Welcome Message
+    try {
+      const { sendVolunteerWelcomeWhatsApp } = require("../services/whatsappBot");
+      await sendVolunteerWelcomeWhatsApp({
+        name: name.trim(),
+        id: newVolunteer.id,
+        phone: phone.trim(),
+        city: city || "Jagtial",
+        interests: interestStr,
+      });
+    } catch (waErr) {
+      console.warn("Volunteer WhatsApp notice:", waErr.message);
+    }
+
     res.status(201).json({
       success: true,
-      message: "Volunteer application submitted successfully! Our team will contact you soon.",
+      message: "Volunteer application submitted successfully! Welcome alerts dispatched via Email & WhatsApp.",
       volunteer: newVolunteer,
     });
   } catch (err) {

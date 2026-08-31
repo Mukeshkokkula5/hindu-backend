@@ -778,9 +778,24 @@ router.post("/wishes", async (req, res) => {
       }
     }
 
+    // 📱 Automated WhatsApp Pooja Token Dispatch
+    try {
+      const { sendNavaratriPoojaReceiptWhatsApp } = require("../services/whatsappBot");
+      await sendNavaratriPoojaReceiptWhatsApp({
+        devotee_name: devotee_name.trim(),
+        token_no,
+        seva_type: seva_type || "నిత్య పూజ & మహామంగళ హారతి",
+        amount: amount || 0,
+        gotram: gotram ? gotram.trim() : "",
+        phone_number: phone_number ? phone_number.trim() : "",
+      });
+    } catch (waErr) {
+      console.warn("Devotional WhatsApp notice:", waErr.message);
+    }
+
     res.json({
       success: true,
-      message: "🙏 మీ గోత్ర నామావళి & పూజా సంకల్పం విజయవంతంగా సమర్పించబడింది!",
+      message: "🙏 మీ గోత్ర నామావళి & పూజా సంకల్పం విజయవంతంగా సమర్పించబడింది! వివరాలు Email & WhatsApp ద్వారా పంపబడ్డాయి.",
       data: result.rows[0],
       token_no,
     });

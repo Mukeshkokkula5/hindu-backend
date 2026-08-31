@@ -1188,9 +1188,17 @@ router.put(
         }
       }
 
+      // 3. Automated Direct WhatsApp Certificate Delivery
+      try {
+        const { sendAapadbandhavaCertificateWhatsApp } = require("../services/whatsappBot");
+        await sendAapadbandhavaCertificateWhatsApp(con);
+      } catch (waErr) {
+        console.warn("Aapadbandhava WhatsApp dispatch notice:", waErr.message);
+      }
+
       res.json({
         success: true,
-        message: `✅ Donation verified! Certificate ${con.certificate_code} approved and dispatched!`,
+        message: `✅ Donation verified! Certificate ${con.certificate_code} approved and dispatched via Email & WhatsApp!`,
         whatsapp_url: whatsappUrl,
         email_sent: emailDispatched,
         certificate_code: con.certificate_code,

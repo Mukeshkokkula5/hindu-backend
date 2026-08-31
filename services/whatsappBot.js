@@ -577,6 +577,189 @@ async function broadcastEmergencyBloodAlertWhatsApp(sosRecord) {
   }
 }
 
+/**
+ * 🌟 4. PUBLIC / SEVA DONATION RECEIPT TEMPLATE
+ */
+function buildPublicDonationWhatsAppTemplate({ name, receiptNo, amount, fundName, receiptDate, verifyUrl }) {
+  return `🚩 *HINDU SWARAJ YOUTH WELFARE ASSOCIATION* 🚩
+॥ ధర్మో రక్షతి రక్షితః • జగిత్యాల (Regd: 784/2025) ॥
+━━━━━━━━━━━━━━━━━━━━
+నమస్తే *${name || "దాత"}* గారు 🙏,
+
+సమాజ సేవ & ప్రజా సంక్షేమం కొరకు మీరు అందించిన పవిత్ర విరాళం విజయవంతంగా స్వీకరించబడింది!
+
+🧾 *రసీదు నంబర్*: *${receiptNo}*
+🏛️ *సేవా విభాగం*: *${fundName || "General Seva Fund"}*
+💰 *విరాళం మొత్తం*: *₹${Number(amount).toLocaleString("en-IN")}.00*
+🗓️ *స్వీకరించిన తేదీ*: ${receiptDate || new Date().toLocaleDateString("en-IN")}
+🏛️ *స్థితి*: ✅ VERIFIED & RECORDED IN AUDIT LEDGER
+
+📥 *మీ అధికారిక సీల్ & సంతకాలతో కూడిన అసలైన PDF రసీదును ఇక్కడ డౌన్‌లోడ్ చేసుకోండి:*
+👉 ${verifyUrl || `https://hinduswarajyouth.online/receipt/${receiptNo}`}
+
+_మీ నిస్వార్థ సహకారానికి అసోసియేషన్ కార్యవర్గం హృదయపూర్వక ధన్యవాదాలు తెలియజేస్తోంది._
+━━━━━━━━━━━━━━━━━━━━
+*కార్యనిర్వాహక వర్గం, హిందూ స్వరాజ్ అసోసియేషన్, జగిత్యాల*
+హెల్ప్‌లైన్: +91 8499878425`;
+}
+
+/**
+ * 🌟 5. AAPADBANDHAVA LIFE-SAVER CERTIFICATE TEMPLATE
+ */
+function buildAapadbandhavaWhatsAppTemplate({ donorName, patientName, amount, certificateCode, certUrl }) {
+  return `🚩 *HINDU SWARAJ YOUTH WELFARE ASSOCIATION* 🚩
+॥ ఆపద్బాంధవ అత్యవసర ప్రజా సహాయ నిధి • జగిత్యాల ॥
+━━━━━━━━━━━━━━━━━━━━
+నమస్కారం *శ్రీ/శ్రీమతి ${donorName || "జీవనదాత"}* గారు 🙏,
+
+జగిత్యాల ఆపద్బాంధవ ద్వారా ప్రాణాపాయ స్థితిలో ఉన్న *${patientName}* గారి అత్యవసర వైద్య చికిత్స నిమిత్తం మీరు అందించిన *₹${Number(amount).toLocaleString("en-IN")}.00* సహాయాన్ని మా అసోసియేషన్ విజయవంతంగా బాధితుడికి అందించింది.
+
+మీ నిస్వార్థ మానవత్వ సేవకు కృతజ్ఞతగా అధికారిక *సేవా ప్రశంసా పత్రం (Certificate of Appreciation)* జారీ చేయబడింది.
+
+🆔 *సర్టిఫికెట్ ఐడీ*: \`${certificateCode}\`
+🔗 *మీ అధికారిక సర్టిఫికెట్ డౌన్‌లోడ్ చేసుకోండి:*
+👉 ${certUrl || `https://hinduswarajyouth.online/aapadbandhava?cert=${certificateCode}`}
+
+_|| ప్రజా సేవయే ఈశ్వర సేవ ||_
+━━━━━━━━━━━━━━━━━━━━
+*అధ్యక్షులు & కార్యవర్గం, హిందూ స్వరాజ్ అసోసియేషన్*`;
+}
+
+/**
+ * 🌟 6. VOLUNTEER WELCOME TEMPLATE
+ */
+function buildVolunteerWelcomeWhatsAppTemplate({ name, volunteerId, city, interests }) {
+  return `🚩 *WELCOME TO HINDU SWARAJ VOLUNTEER FORCE* 🚩
+॥ సంఘటిత శక్తియే సమాజ ప్రగతి • జగిత్యాల ॥
+━━━━━━━━━━━━━━━━━━━━
+నమస్తే *${name}* గారు,
+
+హిందూ స్వరాజ్ యూత్ సేవా దళంలో (Volunteer Force) రిజిస్టర్ అయినందుకు హృదయపూర్వక స్వాగతం! 
+
+🆔 *Volunteer ID*: *#VOL-${volunteerId}*
+📍 *సేవా ప్రాంతం*: ${city || "Jagtial"}
+🎯 *మీ ఆసక్తి*: ${interests || "Social Welfare & Emergency Aid"}
+
+సమాజంలో రక్తదానం, ఆపద్బాంధవ అత్యవసర సేవలు, యువజన నైపుణ్య వికాసం వంటి సేవా కార్యక్రమాలలో మీ పాత్ర ఎంతో విలువైంది.
+
+🔗 *అసోసియేషన్ పోర్టల్*: https://hinduswarajyouth.online
+ఏదైనా సమాచారం కొరకు హెల్ప్‌లైన్: +91 8499878425
+━━━━━━━━━━━━━━━━━━━━
+*హిందూ స్వరాజ్ యూత్ వెల్ఫేర్ అసోసియేషన్*`;
+}
+
+/**
+ * 🌟 7. NAVARATRI SEVA & POOJA TOKEN TEMPLATE
+ */
+function buildNavaratriSevaWhatsAppTemplate({ devoteeName, tokenNo, sevaName, amount, gotram, certUrl }) {
+  return `🪔 *శ్రీ వినాయక / దేవి శరన్నవరాత్రి మహోత్సవాలు - 2026* 🪔
+*హిందూ స్వరాజ్ యూత్ అసోసియేషన్ • జగిత్యాల*
+━━━━━━━━━━━━━━━━━━━━
+నమస్తే *${devoteeName}* గారు 🙏,
+
+మీ గోత్ర నామావళి & పూజా సంకల్పం శ్రీ స్వామివారి పాదపద్మముల వద్ద సమర్పించబడింది!
+
+🎫 *పూజా సంకల్పం టోకెన్*: *${tokenNo}*
+🙏 *గోత్రం*: ${gotram || "స్వ గోత్రం"}
+🪔 *పూజా సేవ*: ${sevaName || "నిత్య పూజ & మహామంగళ హారతి"}
+💰 *సేవా రుసుము*: ₹${amount ? Number(amount).toLocaleString("en-IN") : "0"}.00
+
+🖨️ *మీ అధికారిక పూజా ప్రసాద పత్రం / సర్టిఫికేట్ ఇక్కడ వీక్షించండి:*
+👉 ${certUrl || `https://hinduswarajyouth.online/vinayaka-navaratri?token=${tokenNo}`}
+
+_శ్రీ గణపతి & దుర్గామాత అనుగ్రహంతో మీకు, మీ కుటుంబ సభ్యులకు ఆయురారోగ్య ఐశ్వర్యాలు కలగాలని ప్రార్థిస్తున్నాము._
+━━━━━━━━━━━━━━━━━━━━
+*ఉత్సవ కమిటీ, హిందూ స్వరాజ్ అసోసియేషన్*`;
+}
+
+/**
+ * Helper Dispatchers for Background Execution
+ */
+async function sendDonationReceiptWhatsApp(donation) {
+  try {
+    const phone = donation.donor_phone || donation.phone;
+    if (!phone) return { success: false, error: "No donor phone" };
+    const clean = cleanPhoneNumber(phone);
+    if (!clean) return { success: false, error: "Invalid phone" };
+
+    const msg = buildPublicDonationWhatsAppTemplate({
+      name: donation.donor_name || donation.name,
+      receiptNo: donation.receipt_no,
+      amount: donation.amount,
+      fundName: donation.fund_name,
+      receiptDate: donation.receipt_date,
+      verifyUrl: `https://hinduswarajyouth.online/receipts/verify/${donation.receipt_no}`,
+    });
+
+    return await sendDirectWhatsApp(clean, msg);
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+async function sendAapadbandhavaCertificateWhatsApp(contribution) {
+  try {
+    const phone = contribution.donor_phone || contribution.phone;
+    if (!phone) return { success: false, error: "No phone" };
+    const clean = cleanPhoneNumber(phone);
+    if (!clean) return { success: false, error: "Invalid phone" };
+
+    const msg = buildAapadbandhavaWhatsAppTemplate({
+      donorName: contribution.donor_name,
+      patientName: contribution.patient_name,
+      amount: contribution.amount,
+      certificateCode: contribution.certificate_code,
+      certUrl: `https://hinduswarajyouth.online/aapadbandhava?cert=${contribution.certificate_code}`,
+    });
+
+    return await sendDirectWhatsApp(clean, msg);
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+async function sendVolunteerWelcomeWhatsApp(volunteer) {
+  try {
+    const phone = volunteer.phone;
+    if (!phone) return { success: false, error: "No phone" };
+    const clean = cleanPhoneNumber(phone);
+    if (!clean) return { success: false, error: "Invalid phone" };
+
+    const msg = buildVolunteerWelcomeWhatsAppTemplate({
+      name: volunteer.name,
+      volunteerId: volunteer.id,
+      city: volunteer.city,
+      interests: volunteer.interests || volunteer.interest,
+    });
+
+    return await sendDirectWhatsApp(clean, msg);
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+async function sendNavaratriPoojaReceiptWhatsApp(devotee) {
+  try {
+    const phone = devotee.phone_number || devotee.phone;
+    if (!phone) return { success: false, error: "No phone" };
+    const clean = cleanPhoneNumber(phone);
+    if (!clean) return { success: false, error: "Invalid phone" };
+
+    const msg = buildNavaratriSevaWhatsAppTemplate({
+      devoteeName: devotee.devotee_name,
+      tokenNo: devotee.token_no,
+      sevaName: devotee.seva_type,
+      amount: devotee.amount,
+      gotram: devotee.gotram,
+      certUrl: `https://hinduswarajyouth.online/vinayaka-navaratri?token=${devotee.token_no}`,
+    });
+
+    return await sendDirectWhatsApp(clean, msg);
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
 module.exports = {
   initWhatsApp,
   getWhatsAppStatus,
@@ -586,4 +769,12 @@ module.exports = {
   buildEmergencyBloodWhatsAppTemplate,
   buildSubscriptionReminderWhatsAppTemplate,
   buildPaymentReceiptWhatsAppTemplate,
+  buildPublicDonationWhatsAppTemplate,
+  buildAapadbandhavaWhatsAppTemplate,
+  buildVolunteerWelcomeWhatsAppTemplate,
+  buildNavaratriSevaWhatsAppTemplate,
+  sendDonationReceiptWhatsApp,
+  sendAapadbandhavaCertificateWhatsApp,
+  sendVolunteerWelcomeWhatsApp,
+  sendNavaratriPoojaReceiptWhatsApp,
 };
