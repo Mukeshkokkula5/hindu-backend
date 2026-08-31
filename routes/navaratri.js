@@ -579,8 +579,11 @@ router.post("/wishes", async (req, res) => {
 
     const numOffering = Number(offering_amount) || 0;
 
-    // Rate-limiting / anti-spam: 1 free submission per mobile number
-    if (numOffering === 0) {
+    // Rate-limiting / anti-spam: 1 free submission per mobile number (exempting admin committee test numbers)
+    const ADMIN_TEST_PHONES = ["8801000623", "8499878425", "9573328608", "9494992445", "9848012345", "9391528453", "9493471450"];
+    const isExempt = ADMIN_TEST_PHONES.includes(cleanMobile);
+
+    if (numOffering === 0 && !isExempt) {
       const checkFree = await pool.query(
         `SELECT id FROM navaratri_wishes 
          WHERE mobile = $1 AND (offering_amount = 0 OR offering_amount IS NULL) 
