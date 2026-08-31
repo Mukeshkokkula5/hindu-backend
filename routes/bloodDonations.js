@@ -491,6 +491,138 @@ function generateEmergencyBloodEmailHtml({ patient_name, blood_group, units, hos
   `;
 }
 
+/**
+ * 🚨 Helper to broadcast Emergency Blood Alert to all registered Members & Volunteers
+ */
+async function broadcastEmergencyBloodAlert(sosRecord, isRebroadcast = false) {
+  try {
+    const [usersResult, volResult] = await Promise.all([
+      pool.query(
+        "SELECT id, name, role, personal_email, username, phone, blood_group FROM users WHERE (personal_email IS NOT NULL AND personal_email != '') OR (username LIKE '%@%')"
+      ),
+      pool.query(
+        "SELECT id, name, email, phone, blood_group, city FROM volunteers"
+      ),
+    ]);
+
+    const recipientMap = new Map();
+
+    const isValidTargetEmail = (email) => {
+      if (!email || typeof email !== "string") return false;
+      const clean = email.trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) return false;
+      if (
+        clean.endsWith("@example.com") ||
+        clean.endsWith("@test.com") ||
+        clean.endsWith("@test.org") ||
+        clean.endsWith("@localhost") ||
+        clean.endsWith("@hsy.org")
+      ) {
+        return false;
+      }
+      return true;
+    };
+
+    // Add registered members & officers
+    usersResult.rows.forEach((u) => {
+      const email = (u.personal_email || (u.username && u.username.includes("@") ? u.username : "") || "").trim().toLowerCase();
+      if (isValidTargetEmail(email)) {
+        recipientMap.set(email, {
+          id: u.id,
+          name: u.name || "Association Member",
+          role: u.role || "MEMBER",
+          type: "MEMBER",
+          email,
+          phone: u.phone || "N/A",
+          blood_group: u.blood_group || "N/A",
+          status: "PENDING",
+        });
+      }
+    });
+
+    // Add registered volunteers
+    volResult.rows.forEach((v) => {
+      const email = (v.email || "").trim().toLowerCase();
+      if (isValidTargetEmail(email)) {
+        if (!recipientMap.has(email)) {
+          recipientMap.set(email, {
+            id: v.id,
+            name: v.name || "Volunteer Donor",
+            role: "VOLUNTEER",
+            type: "VOLUNTEER",
+            email,
+            phone: v.phone || "N/A",
+            blood_group: v.blood_group || "N/A",
+            city: v.city || "Jagtial",
+            status: "PENDING",
+          });
+        }
+      }
+    });
+
+    // Always include official association email
+    if (isValidTargetEmail("hinduswarajyouth@gmail.com")) {
+      recipientMap.set("hinduswarajyouth@gmail.com", {
+        name: "Hindu Swaraj Central Helpline",
+        role: "SUPER_ADMIN",
+        type: "CENTRAL_DESK",
+        email: "hinduswarajyouth@gmail.com",
+        phone: "+91 8499878425",
+        blood_group: "ALL",
+        status: "PENDING",
+      });
+    }
+
+    const dispatchedList = Array.from(recipientMap.values());
+    console.log(`🚨 DISPATCHING EMERGENCY BLOOD ALERT TO ${dispatchedList.length} VERIFIED RECIPIENTS...`);
+
+    const emailHtml = generateEmergencyBloodEmailHtml({
+      patient_name: sosRecord.patient_name,
+      blood_group: sosRecord.blood_group,
+      units: sosRecord.units,
+      hospital: sosRecord.hospital,
+      contact_phone: sosRecord.contact_phone,
+      urgency: sosRecord.urgency,
+      notes: sosRecord.notes,
+    });
+
+    const prefix = isRebroadcast ? "🚨 [RE-ALERT] " : "🚨 ";
+    const subject = `${prefix}URGENT BLOOD NEEDED IN JAGTIAL: ${sosRecord.blood_group} (${sosRecord.units || 1} Unit) for ${sosRecord.patient_name}`;
+
+    let dispatchedCount = 0;
+
+    // Send emails sequentially with small delay (50ms) to ensure deliverability and avoid rate limits
+    for (const rec of dispatchedList) {
+      try {
+        const ok = await sendMail(rec.email, subject, emailHtml);
+        if (ok) {
+          rec.status = "SENT";
+          rec.sent_at = new Date().toISOString();
+          dispatchedCount++;
+        } else {
+          rec.status = "FAILED";
+        }
+      } catch (e) {
+        rec.status = "FAILED";
+        console.error(`Email send failed for ${rec.email}:`, e.message);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    // Persist verified dispatch audit to DB
+    await pool.query(
+      "UPDATE blood_requests SET emails_dispatched = $1, dispatched_recipients = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3",
+      [dispatchedCount, JSON.stringify(dispatchedList), sosRecord.id]
+    ).catch((e) => console.error("Error updating blood_requests dispatch log:", e.message));
+
+    console.log(`✅ CONFIRMED DISPATCHED EMERGENCY BLOOD EMAILS TO ${dispatchedCount}/${dispatchedList.length} RECIPIENTS.`);
+    return { dispatchedCount, dispatchedList };
+  } catch (err) {
+    console.error("Broadcast Emergency Blood Alert Error:", err);
+    return { dispatchedCount: 0, dispatchedList: [] };
+  }
+}
+
 router.post("/sos", async (req, res) => {
   try {
     const {
@@ -531,118 +663,22 @@ router.post("/sos", async (req, res) => {
 
     const sosRecord = insertRes.rows[0];
 
-    // 2. Query all recipients for Automated Email Broadcast
-    // Query users (personal_email / username) and volunteers (email)
-    const [usersResult, volResult] = await Promise.all([
-      pool.query(
-        "SELECT id, name, role, personal_email, username, phone, blood_group FROM users WHERE (personal_email IS NOT NULL AND personal_email != '') OR (username LIKE '%@%')"
-      ),
-      pool.query(
-        "SELECT id, name, email, phone, blood_group, city FROM volunteers"
-      ),
-    ]);
-
-    const recipientMap = new Map();
-
-    // Add registered members & officers
-    usersResult.rows.forEach((u) => {
-      const email = (u.personal_email || u.username || "").trim().toLowerCase();
-      if (email && email.includes("@")) {
-        recipientMap.set(email, {
-          id: u.id,
-          name: u.name || "Association Member",
-          role: u.role || "MEMBER",
-          type: "MEMBER",
-          email,
-          phone: u.phone || "N/A",
-          blood_group: u.blood_group || "N/A",
-          status: "SENT",
-          sent_at: new Date().toISOString(),
-        });
-      }
-    });
-
-    // Add registered volunteers
-    volResult.rows.forEach((v) => {
-      const email = (v.email || "").trim().toLowerCase();
-      if (email && email.includes("@")) {
-        if (!recipientMap.has(email)) {
-          recipientMap.set(email, {
-            id: v.id,
-            name: v.name || "Volunteer Donor",
-            role: "VOLUNTEER",
-            type: "VOLUNTEER",
-            email,
-            phone: v.phone || "N/A",
-            blood_group: v.blood_group || "N/A",
-            city: v.city || "Jagtial",
-            status: "SENT",
-            sent_at: new Date().toISOString(),
-          });
-        }
-      }
-    });
-
-    // Always include official association email
-    if (!recipientMap.has("hinduswarajyouth@gmail.com")) {
-      recipientMap.set("hinduswarajyouth@gmail.com", {
-        name: "Hindu Swaraj Central Helpline",
-        role: "SUPER_ADMIN",
-        type: "CENTRAL_DESK",
-        email: "hinduswarajyouth@gmail.com",
-        phone: "+91 8499878425",
-        blood_group: "ALL",
-        status: "SENT",
-        sent_at: new Date().toISOString(),
-      });
-    }
-
-    const dispatchedList = Array.from(recipientMap.values());
-    console.log(`🚨 DISPATCHING EMERGENCY BLOOD ALERT TO ${dispatchedList.length} RECIPIENTS (MEMBERS & VOLUNTEERS)...`);
-
-    const emailHtml = generateEmergencyBloodEmailHtml({
-      patient_name: sosRecord.patient_name,
-      blood_group: sosRecord.blood_group,
-      units: sosRecord.units,
-      hospital: sosRecord.hospital,
-      contact_phone: sosRecord.contact_phone,
-      urgency: sosRecord.urgency,
-      notes: sosRecord.notes,
-    });
-
-    const subject = `🚨 URGENT BLOOD NEEDED IN JAGTIAL: ${sosRecord.blood_group} (${sosRecord.units} Unit) for ${sosRecord.patient_name}`;
-
-    // Dispatch emails asynchronously in parallel batches
-    let dispatchedCount = 0;
-    const sendPromises = dispatchedList.map(async (rec) => {
-      try {
-        const ok = await sendMail(rec.email, subject, emailHtml);
-        if (ok) dispatchedCount++;
-      } catch (e) {
-        console.error(`Email send failed for ${rec.email}:`, e.message);
-      }
-    });
-
-    // Wait or background resolve and save full audit JSON to DB
-    Promise.allSettled(sendPromises).then(async () => {
-      console.log(`✅ DISPATCHED EMERGENCY BLOOD EMAILS TO ${dispatchedCount} MEMBERS.`);
-      await pool.query(
-        "UPDATE blood_requests SET emails_dispatched = $1, dispatched_recipients = $2 WHERE id = $3",
-        [dispatchedCount, JSON.stringify(dispatchedList), sosRecord.id]
-      ).catch(() => {});
-    });
+    // 2. Automated Email Broadcast (Awaited to guarantee actual delivery)
+    const { dispatchedCount, dispatchedList } = await broadcastEmergencyBloodAlert(sosRecord, false);
 
     // WhatsApp preformatted text
     const whatsappMsg = `🚨 *URGENT BLOOD REQUIRED IN JAGTIAL*%0A• *Patient*: ${encodeURIComponent(sosRecord.patient_name)}%0A• *Blood Group*: ${encodeURIComponent(sosRecord.blood_group)}%0A• *Units Needed*: ${sosRecord.units} Unit%0A• *Hospital*: ${encodeURIComponent(sosRecord.hospital)}%0A• *Attender Contact*: ${encodeURIComponent(sosRecord.contact_phone)}%0A• *Urgency*: ${encodeURIComponent(sosRecord.urgency)}%0A%0A🛑 *Please respond immediately if you can donate or know someone in Jagtial!*`;
 
     res.json({
       success: true,
-      message: "🚨 Emergency Blood SOS registered! Automated email broadcast dispatched to all members and volunteers.",
+      message: `🚨 Emergency Blood SOS registered! Alerts successfully delivered to ${dispatchedCount} members & volunteers.`,
       data: {
         ...sosRecord,
+        emails_dispatched: dispatchedCount,
         dispatched_recipients: dispatchedList,
       },
       total_recipients: dispatchedList.length,
+      dispatched_count: dispatchedCount,
       dispatched_recipients: dispatchedList,
       whatsapp_url: `https://wa.me/918499878425?text=${whatsappMsg}`,
     });
@@ -857,85 +893,13 @@ router.post(
       }
       const sosRecord = sosRes.rows[0];
 
-      const [usersResult, volResult] = await Promise.all([
-        pool.query(
-          "SELECT id, name, role, personal_email, username, phone, blood_group FROM users WHERE (personal_email IS NOT NULL AND personal_email != '') OR (username LIKE '%@%')"
-        ),
-        pool.query("SELECT id, name, email, phone, blood_group, city FROM volunteers"),
-      ]);
-
-      const recipientMap = new Map();
-      usersResult.rows.forEach((u) => {
-        const email = (u.personal_email || u.username || "").trim().toLowerCase();
-        if (email && email.includes("@")) {
-          recipientMap.set(email, {
-            id: u.id,
-            name: u.name || "Association Member",
-            role: u.role || "MEMBER",
-            type: "MEMBER",
-            email,
-            phone: u.phone || "N/A",
-            blood_group: u.blood_group || "N/A",
-            status: "SENT",
-            sent_at: new Date().toISOString(),
-          });
-        }
-      });
-
-      volResult.rows.forEach((v) => {
-        const email = (v.email || "").trim().toLowerCase();
-        if (email && email.includes("@")) {
-          if (!recipientMap.has(email)) {
-            recipientMap.set(email, {
-              id: v.id,
-              name: v.name || "Volunteer Donor",
-              role: "VOLUNTEER",
-              type: "VOLUNTEER",
-              email,
-              phone: v.phone || "N/A",
-              blood_group: v.blood_group || "N/A",
-              city: v.city || "Jagtial",
-              status: "SENT",
-              sent_at: new Date().toISOString(),
-            });
-          }
-        }
-      });
-
-      if (!recipientMap.has("hinduswarajyouth@gmail.com")) {
-        recipientMap.set("hinduswarajyouth@gmail.com", {
-          name: "Hindu Swaraj Central Helpline",
-          role: "SUPER_ADMIN",
-          type: "CENTRAL_DESK",
-          email: "hinduswarajyouth@gmail.com",
-          phone: "+91 8499878425",
-          blood_group: "ALL",
-          status: "SENT",
-          sent_at: new Date().toISOString(),
-        });
-      }
-
-      const dispatchedList = Array.from(recipientMap.values());
-      const emailHtml = generateEmergencyBloodEmailHtml(sosRecord);
-      const subject = `🚨 [RE-ALERT] URGENT BLOOD NEEDED IN JAGTIAL: ${sosRecord.blood_group} for ${sosRecord.patient_name}`;
-
-      let dispatchedCount = 0;
-      await Promise.allSettled(
-        dispatchedList.map(async (rec) => {
-          const ok = await sendMail(rec.email, subject, emailHtml);
-          if (ok) dispatchedCount++;
-        })
-      );
-
-      await pool.query(
-        "UPDATE blood_requests SET emails_dispatched = $1, dispatched_recipients = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3",
-        [dispatchedCount, JSON.stringify(dispatchedList), id]
-      );
+      const { dispatchedCount, dispatchedList } = await broadcastEmergencyBloodAlert(sosRecord, true);
 
       res.json({
         success: true,
-        message: `🚨 Emergency Alert re-broadcasted to ${dispatchedCount} members and volunteers!`,
+        message: `🚨 Emergency Alert re-broadcasted! Successfully delivered to ${dispatchedCount} members & volunteers.`,
         dispatched_recipients: dispatchedList,
+        emails_dispatched: dispatchedCount,
       });
     } catch (err) {
       console.error("Rebroadcast Error:", err);
