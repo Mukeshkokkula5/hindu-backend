@@ -579,27 +579,6 @@ router.post("/wishes", async (req, res) => {
 
     const numOffering = Number(offering_amount) || 0;
 
-    // Rate-limiting / anti-spam: 1 free submission per mobile number (exempting admin committee test numbers)
-    const ADMIN_TEST_PHONES = ["8801000623", "8499878425", "9573328608", "9494992445", "9848012345", "9391528453", "9493471450"];
-    const isExempt = ADMIN_TEST_PHONES.includes(cleanMobile);
-
-    if (numOffering === 0 && !isExempt) {
-      const checkFree = await pool.query(
-        `SELECT id FROM navaratri_wishes 
-         WHERE mobile = $1 AND (offering_amount = 0 OR offering_amount IS NULL) 
-         LIMIT 1`,
-        [cleanMobile]
-      );
-
-      if (checkFree.rows.length > 0) {
-        return res.status(400).json({
-          success: false,
-          already_free: true,
-          error: "ఈ మొబైల్ నంబర్‌తో ఉచిత పూజా సంకల్పం ఇప్పటికే నమోదు చేయబడింది. మీరు స్వామివారి నిత్య అన్నదానానికి ₹51, ₹101 లేదా ₹116 కానుక సమర్పించి అదనపు సంకల్పం చేసుకోవచ్చు.",
-        });
-      }
-    }
-
     const token_no = `HSY-NAV-2026-${Math.floor(1000 + Math.random() * 9000)}`;
 
     const result = await pool.query(
