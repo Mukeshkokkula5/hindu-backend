@@ -139,6 +139,48 @@ async function sendDirectWhatsApp(phone, textMessage) {
   };
 }
 
+async function backupAuthToDatabase(dir) {
+  try {
+    if (!fs.existsSync(dir)) return;
+    const files = fs.readdirSync(dir);
+    if (!files.length) return;
+    const sessionPayload = {};
+    for (const f of files) {
+      const filePath = path.join(dir, f);
+      try {
+        sessionPayload[f] = fs.readFileSync(filePath, "utf-8");
+      } catch (e) {}
+    }
+    await pool.query(
+      `INSERT INTO whatsapp_bot_session (session_id, session_data, updated_at)
+       VALUES ('default_hsy_session', $1, CURRENT_TIMESTAMP)
+       ON CONFLICT (session_id) DO UPDATE SET session_data = $1, updated_at = CURRENT_TIMESTAMP`,
+      [JSON.stringify(sessionPayload)]
+    ).catch(() => {});
+  } catch (err) {}
+}
+
+async function restoreAuthFromDatabase(dir) {
+  try {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const existing = fs.readdirSync(dir);
+    if (existing.length > 0) return;
+
+    const res = await pool.query(
+      "SELECT session_data FROM whatsapp_bot_session WHERE session_id = 'default_hsy_session'"
+    );
+    if (res.rows.length && res.rows[0].session_data) {
+      const sessionData = res.rows[0].session_data;
+      for (const [filename, content] of Object.entries(sessionData)) {
+        try {
+          fs.writeFileSync(path.join(dir, filename), content, "utf-8");
+        } catch (e) {}
+      }
+      console.log("🔄 [WhatsAppBot] Restored WhatsApp session from PostgreSQL database!");
+    }
+  } catch (err) {}
+}
+
 /**
  * Initialize Baileys WhatsApp Socket
  */
@@ -162,6 +204,9 @@ async function initWhatsApp(forceNew = false) {
       lastConnectedAt,
     };
   }
+
+  // Restore auth credentials from DB if starting fresh on new host
+  await restoreAuthFromDatabase(authDir);
 
   // If running in serverless Vercel environment where WebSockets cannot persist
   if (process.env.VERCEL) {
@@ -237,7 +282,10 @@ async function initWhatsApp(forceNew = false) {
         markOnlineOnConnect: true,
       });
 
-      sock.ev.on("creds.update", saveCreds);
+      sock.ev.on("creds.update", async () => {
+        await saveCreds();
+        backupAuthToDatabase(authDir).catch(() => {});
+      });
 
       sock.ev.on("connection.update", async (update) => {
         const { connection, lastDisconnect, qr } = update;
@@ -339,6 +387,7 @@ async function logoutWhatsApp() {
     connectedPhoneNumber = "";
     try {
       fs.rmSync(authDir, { recursive: true, force: true });
+      await pool.query("DELETE FROM whatsapp_bot_session WHERE session_id = 'default_hsy_session'").catch(() => {});
     } catch (e) {}
     return { success: true, message: "WhatsApp session disconnected." };
   } catch (err) {
