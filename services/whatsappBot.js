@@ -134,7 +134,7 @@ async function sendDirectWhatsApp(phone, textMessage) {
     try {
       await initWhatsApp();
       let waits = 0;
-      while (connectionStatus !== "CONNECTED" && waits < 8) {
+      while (connectionStatus !== "CONNECTED" && waits < 20) {
         await new Promise((r) => setTimeout(r, 500));
         waits++;
       }
@@ -177,19 +177,21 @@ async function restoreAuthFromDatabase(dir) {
   try {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const existing = fs.readdirSync(dir);
-    if (existing.length > 0) return;
+    if (existing.length > 5) return;
 
     const res = await pool.query(
       "SELECT session_data FROM whatsapp_bot_session WHERE session_id = 'default_hsy_session'"
     );
     if (res.rows.length && res.rows[0].session_data) {
       const sessionData = res.rows[0].session_data;
-      for (const [filename, content] of Object.entries(sessionData)) {
+      const entries = Object.entries(sessionData);
+      console.log(`🔄 [WhatsAppBot] Restoring ${entries.length} session files from DB...`);
+      for (const [filename, content] of entries) {
         try {
-          fs.writeFileSync(path.join(dir, filename), content, "utf-8");
+          fs.writeFileSync(path.join(dir, filename), typeof content === "string" ? content : JSON.stringify(content), "utf-8");
         } catch (e) {}
       }
-      console.log("🔄 [WhatsAppBot] Restored WhatsApp session from PostgreSQL database!");
+      console.log("✅ [WhatsAppBot] Restored session from PostgreSQL database!");
     }
   } catch (err) {}
 }
@@ -235,7 +237,7 @@ async function initWhatsApp(forceNew = false) {
           connectedPhoneNumber,
         });
       }
-    }, 6000);
+    }, 15000);
 
     try {
       let Baileys;
