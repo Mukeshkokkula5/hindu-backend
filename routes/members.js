@@ -9,6 +9,14 @@ const { addMemberTemplate, resendLoginTemplate } = require("../utils/emailTempla
 
 const router = express.Router();
 
+// 🔒 Anti-caching headers for member records
+router.use((req, res, next) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.set("Pragma", "no-cache");
+  res.set("Expires", "0");
+  next();
+});
+
 function generateRandomMemberPassword() {
   const prefix = "HSY@";
   const num = Math.floor(1000 + Math.random() * 9000);

@@ -14,14 +14,38 @@ const {
 
 const router = express.Router();
 
+// 🔒 Anti-caching headers for sensitive authentication responses
+router.use((req, res, next) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.set("Pragma", "no-cache");
+  res.set("Expires", "0");
+  next();
+});
+
 /* =========================
-   🛡️ AUTH BRUTE-FORCE RATE LIMITER
+   🛡️ AUTH BRUTE-FORCE RATE LIMITERS
 ========================= */
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes window
+  max: 5, // 5 failed attempts per 15 minutes per IP
+  message: {
+    error: "Too many failed login attempts (5 attempts limit). For your security, this account/IP is temporarily locked for 15 minutes. Please try again later or use Forgot Password to reset.",
+  },
+  skipSuccessfulRequests: true,
+  skip: (req) =>
+    req.ip === "127.0.0.1" ||
+    req.ip === "::1" ||
+    req.ip === "::ffff:127.0.0.1" ||
+    process.env.NODE_ENV === "development",
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 30, // 30 attempts per 15 minutes per IP
+  max: 15, // 15 attempts for OTP / forgot password
   message: {
-    error: "Too many login/OTP attempts. Please try again after 15 minutes.",
+    error: "Too many requests. Please try again after 15 minutes.",
   },
   skipSuccessfulRequests: true,
   skip: (req) =>
@@ -76,7 +100,7 @@ router.post("/register", async (req, res) => {
 /* =========================
    🔑 LOGIN (USERNAME / EMAIL)
 ========================= */
-router.post("/login", authLimiter, async (req, res) => {
+router.post("/login", loginLimiter, async (req, res) => {
   try {
     const { email, username, password } = req.body;
     const loginId = email || username;

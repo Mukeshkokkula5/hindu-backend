@@ -3,6 +3,14 @@ const router = express.Router();
 const pool = require("../db");
 const jwt = require("jsonwebtoken");
 
+// 🔒 Anti-caching headers for financial & treasury records
+router.use((req, res, next) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.set("Pragma", "no-cache");
+  res.set("Expires", "0");
+  next();
+});
+
 const verifyToken = require("../middleware/verifyToken");
 
 const normalizeRole = (role) => (role || "").toUpperCase().replace(/\s+/g, "_");
