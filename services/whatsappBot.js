@@ -119,7 +119,7 @@ async function sendViaBaileys(phone, messageText) {
 }
 
 /**
- * 🚀 3. UNIFIED DIRECT WHATSAPP SENDER (Attempts Cloud API first, then Baileys)
+ * 🚀 3. UNIFIED DIRECT WHATSAPP SENDER (Attempts Cloud API first, then Baileys with Auto-Reconnect)
  */
 async function sendDirectWhatsApp(phone, textMessage) {
   // Try Meta Cloud API if configured
@@ -128,14 +128,26 @@ async function sendDirectWhatsApp(phone, textMessage) {
     if (metaRes.success) return metaRes;
   }
 
-  // Fallback to Baileys if connected
+  // If Baileys is not active, try auto-connecting from stored DB session
+  if (!sock || connectionStatus !== "CONNECTED") {
+    console.log("[WhatsAppBot] Socket offline. Attempting on-demand reconnection from stored session...");
+    try {
+      await initWhatsApp();
+      // Brief pause to allow socket handshake
+      if (connectionStatus !== "CONNECTED") {
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    } catch (e) {}
+  }
+
+  // Send via Baileys if connected
   if (sock && connectionStatus === "CONNECTED") {
     return await sendViaBaileys(phone, textMessage);
   }
 
   return {
     success: false,
-    error: "WhatsApp gateway is not connected. Please scan QR or configure WhatsApp API.",
+    error: "WhatsApp gateway is not connected. Please scan the QR code in Admin Dashboard to connect.",
   };
 }
 
