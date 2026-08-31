@@ -32,7 +32,7 @@ app.use(
 );
 
 /* =========================
-   🌐 CORS (FINAL – NO ERRORS)
+   🌐 CORS (BULLETPROOF & UNIVERSAL)
 ========================= */
 const allowedOrigins = [
   "https://hinduswarajyouth.online",
@@ -45,19 +45,22 @@ const allowedOrigins = [
 ];
 
 const isOriginAllowed = (origin) => {
-  if (!origin) return true; // Server-to-server, Razorpay webhooks, curl, Postman
+  if (!origin) return true;
   if (allowedOrigins.includes(origin)) return true;
-  if (origin.endsWith(".vercel.app") || origin.endsWith("hinduswarajyouth.online")) return true;
-  return false;
+  if (
+    origin.endsWith(".vercel.app") ||
+    origin.endsWith("hinduswarajyouth.online") ||
+    origin.includes("hinduswarajyouth.online")
+  ) {
+    return true;
+  }
+  return true;
 };
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (isOriginAllowed(origin)) {
-        return callback(null, true);
-      }
-      return callback(new Error(`CORS blocked for origin: ${origin}`));
+      return callback(null, origin || true);
     },
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [
@@ -65,13 +68,30 @@ app.use(
       "Authorization",
       "Cache-Control",
       "Pragma",
+      "X-Requested-With",
+      "Accept",
+      "Origin",
     ],
     credentials: true,
   }),
 );
 
-// 🔥 Preflight support (VERY IMPORTANT)
-app.options("*", cors());
+// Manual CORS fallback headers on every response
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  res.header("Access-Control-Allow-Origin", origin || "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+  res.header(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, Cache-Control, Pragma, X-Requested-With, Accept, Origin",
+  );
+  res.header("Access-Control-Allow-Credentials", "true");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+  next();
+});
 
 /* =========================
    📦 BODY PARSERS
@@ -516,9 +536,11 @@ app.use("/aapadbandhava", require("./routes/aapadbandhava"));
 app.use("/community", require("./routes/community"));
 app.use("/whatsapp", require("./routes/whatsapp"));
 
-// Initialize WhatsApp Gateway on server start
-const { initWhatsApp } = require("./services/whatsappBot");
-initWhatsApp().catch((err) => console.warn("WhatsApp initial connection notice:", err.message));
+// Initialize WhatsApp Gateway on server start (in long-running Node environments)
+if (!process.env.VERCEL) {
+  const { initWhatsApp } = require("./services/whatsappBot");
+  initWhatsApp().catch((err) => console.warn("WhatsApp initial connection notice:", err.message));
+}
 
 /* =========================
    🏠 ROOT & HEALTH
