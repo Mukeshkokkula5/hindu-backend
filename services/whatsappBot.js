@@ -133,9 +133,10 @@ async function sendDirectWhatsApp(phone, textMessage) {
     console.log("[WhatsAppBot] Socket offline. Attempting on-demand reconnection from stored session...");
     try {
       await initWhatsApp();
-      // Brief pause to allow socket handshake
-      if (connectionStatus !== "CONNECTED") {
-        await new Promise((r) => setTimeout(r, 2000));
+      let waits = 0;
+      while (connectionStatus !== "CONNECTED" && waits < 8) {
+        await new Promise((r) => setTimeout(r, 500));
+        waits++;
       }
     } catch (e) {}
   }
@@ -220,18 +221,7 @@ async function initWhatsApp(forceNew = false) {
   // Restore auth credentials from DB if starting fresh on new host
   await restoreAuthFromDatabase(authDir);
 
-  // If running in serverless Vercel environment where WebSockets cannot persist
-  if (process.env.VERCEL) {
-    return {
-      status: "DISCONNECTED",
-      isConnected: false,
-      isServerless: true,
-      message: "Vercel Serverless environment detected. Connect via Meta Cloud API or Dedicated Node Server for background WhatsApp.",
-      qrCodeDataUrl: null,
-    };
-  }
-
-  // Local / Long-running Node.js Server: Initialize Baileys
+  // Local / Long-running or On-Demand Server: Initialize Baileys
   return new Promise(async (resolve) => {
     let hasResolved = false;
 
