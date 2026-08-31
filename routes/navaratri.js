@@ -1322,4 +1322,62 @@ router.delete(
   }
 );
 
+/* =====================================================
+   📱 13. PUBLIC / DEVOTEE: SEND BLESSING CERTIFICATE TO WHATSAPP (0 TABS)
+   POST /navaratri/send-whatsapp
+===================================================== */
+router.post("/send-whatsapp", async (req, res) => {
+  try {
+    const { token_no, mobile } = req.body || {};
+    if (!token_no && !mobile) {
+      return res.status(400).json({ success: false, error: "Token or mobile number is required." });
+    }
+
+    let wish = null;
+    if (token_no) {
+      const q = await pool.query("SELECT * FROM navaratri_wishes WHERE token_no = $1 LIMIT 1", [token_no]);
+      if (q.rows.length) wish = q.rows[0];
+    }
+    if (!wish && mobile) {
+      const cleanMob = String(mobile).replace(/\D/g, "").slice(-10);
+      const q = await pool.query("SELECT * FROM navaratri_wishes WHERE mobile LIKE $1 ORDER BY id DESC LIMIT 1", [`%${cleanMob}%`]);
+      if (q.rows.length) wish = q.rows[0];
+    }
+
+    if (!wish) {
+      return res.status(404).json({ success: false, error: "Pooja blessing record not found." });
+    }
+
+    const { sendNavaratriPoojaReceiptWhatsApp } = require("../services/whatsappBot");
+    const targetMobile = mobile || wish.mobile;
+    const numOffering = Number(wish.offering_amount) || 0;
+
+    const waRes = await sendNavaratriPoojaReceiptWhatsApp({
+      devotee_name: wish.devotee_name,
+      token_no: wish.token_no,
+      seva_type: numOffering > 0 ? `శ్రీ వినాయక దివ్య కానుక సేవ (₹${numOffering.toLocaleString("en-IN")})` : "శ్రీ వినాయక నిత్య సహస్రనామార్చన & సంకల్ప పూజ",
+      amount: numOffering,
+      gotram: wish.gotram,
+      mobile: targetMobile,
+      phone: targetMobile,
+    });
+
+    if (!waRes.success) {
+      return res.status(400).json({
+        success: false,
+        error: waRes.error || "Failed to dispatch WhatsApp message.",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "✅ పూజా ప్రసాద పత్రం మీ వాట్సాప్‌కు నేరుగా పంపబడింది!",
+      data: waRes,
+    });
+  } catch (err) {
+    console.error("SEND NAVARATRI WHATSAPP ERROR 👉", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
