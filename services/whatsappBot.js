@@ -524,31 +524,55 @@ async function broadcastEmergencyBloodAlertWhatsApp(sosRecord) {
 
     const targetPhones = new Map();
 
+    const isRealPhone = (p) => {
+      if (!p || typeof p !== "string") return false;
+      const digits = p.replace(/\D/g, "").slice(-10);
+      if (digits.length !== 10) return false;
+      if (digits === "1234567890" || digits === "9876543210" || digits === "0000000000" || digits === "9440000000") return false;
+      return /^[6-9]\d{9}$/.test(digits);
+    };
+
     usersResult.rows.forEach((u) => {
       const clean = cleanPhoneNumber(u.phone);
-      if (clean && clean.length >= 10) targetPhones.set(clean.slice(-10), { name: u.name, type: "MEMBER" });
+      if (clean) {
+        const phone10 = clean.slice(-10);
+        if (isRealPhone(phone10)) {
+          targetPhones.set(phone10, { name: u.name, type: "MEMBER" });
+        }
+      }
     });
 
     volResult.rows.forEach((v) => {
       const clean = cleanPhoneNumber(v.phone);
-      if (clean && clean.length >= 10 && !targetPhones.has(clean.slice(-10))) {
-        targetPhones.set(clean.slice(-10), { name: v.name, type: "VOLUNTEER" });
+      if (clean) {
+        const phone10 = clean.slice(-10);
+        if (isRealPhone(phone10) && !targetPhones.has(phone10)) {
+          targetPhones.set(phone10, { name: v.name, type: "VOLUNTEER" });
+        }
       }
     });
 
     const msgText = buildEmergencyBloodWhatsAppTemplate(sosRecord);
     let sentCount = 0;
+    console.log(`🚨 [WhatsAppBot] Broadcasting SOS to ${targetPhones.size} verified phone numbers...`);
 
-    for (const [phone10] of targetPhones) {
+    for (const [phone10, info] of targetPhones) {
       try {
         const res = await sendDirectWhatsApp(`91${phone10}`, msgText);
-        if (res.success) sentCount++;
-      } catch (e) {}
-      await new Promise((r) => setTimeout(r, 1000));
+        if (res.success) {
+          sentCount++;
+          console.log(`✅ [WhatsAppBot] Emergency SOS sent to ${info.name} (91${phone10})`);
+        }
+      } catch (e) {
+        console.warn(`⚠️ [WhatsAppBot] Failed to send SOS to 91${phone10}:`, e.message);
+      }
+      // Small pause between messages to prevent spam throttle
+      await new Promise((r) => setTimeout(r, 400));
     }
 
     return { success: true, dispatchedCount: sentCount, totalTargets: targetPhones.size };
   } catch (err) {
+    console.error("❌ [WhatsAppBot] SOS Broadcast Error:", err);
     return { success: false, error: err.message, dispatchedCount: 0 };
   }
 }

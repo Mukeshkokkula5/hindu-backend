@@ -5,6 +5,7 @@ const checkRole = require("../middleware/checkRole");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const { broadcastEmergencyBloodAlertWhatsApp } = require("../services/whatsappBot");
 
 const router = express.Router();
 
@@ -663,14 +664,14 @@ router.post("/sos", async (req, res) => {
 
     const sosRecord = insertRes.rows[0];
 
-    // 2. Automated Email Broadcast (Awaited to guarantee actual delivery)
-    const { dispatchedCount, dispatchedList } = await broadcastEmergencyBloodAlert(sosRecord, false);
-
-    // 3. Automated Direct WhatsApp Broadcast (via linked WhatsApp Bot)
-    const { broadcastEmergencyBloodAlertWhatsApp } = require("../services/whatsappBot");
-    broadcastEmergencyBloodAlertWhatsApp(sosRecord).catch((e) =>
-      console.warn("WhatsApp SOS auto-broadcast notice:", e.message)
-    );
+    // 2. Automated Email & WhatsApp Broadcast (Awaited to ensure full delivery)
+    const [emailRes, waRes] = await Promise.allSettled([
+      broadcastEmergencyBloodAlert(sosRecord, false),
+      broadcastEmergencyBloodAlertWhatsApp(sosRecord),
+    ]);
+    const dispatchedCount = emailRes.status === "fulfilled" ? emailRes.value.dispatchedCount : 0;
+    const dispatchedList = emailRes.status === "fulfilled" ? emailRes.value.dispatchedList : [];
+    const waCount = waRes.status === "fulfilled" ? waRes.value.dispatchedCount : 0;
 
     // WhatsApp preformatted text (for manual 1-click fallback)
     const whatsappMsg = `🚨 *URGENT BLOOD REQUIRED IN JAGTIAL*%0A• *Patient*: ${encodeURIComponent(sosRecord.patient_name)}%0A• *Blood Group*: ${encodeURIComponent(sosRecord.blood_group)}%0A• *Units Needed*: ${sosRecord.units} Unit%0A• *Hospital*: ${encodeURIComponent(sosRecord.hospital)}%0A• *Attender Contact*: ${encodeURIComponent(sosRecord.contact_phone)}%0A• *Urgency*: ${encodeURIComponent(sosRecord.urgency)}%0A%0A🛑 *Please respond immediately if you can donate or know someone in Jagtial!*`;
@@ -899,16 +900,20 @@ router.post(
       }
       const sosRecord = sosRes.rows[0];
 
-      const { dispatchedCount, dispatchedList } = await broadcastEmergencyBloodAlert(sosRecord, true);
-      broadcastEmergencyBloodAlertWhatsApp(sosRecord).catch((e) =>
-        console.warn("WhatsApp rebroadcast notice:", e.message)
-      );
+      const [emailRes, waRes] = await Promise.allSettled([
+        broadcastEmergencyBloodAlert(sosRecord, true),
+        broadcastEmergencyBloodAlertWhatsApp(sosRecord),
+      ]);
+      const dispatchedCount = emailRes.status === "fulfilled" ? emailRes.value.dispatchedCount : 0;
+      const dispatchedList = emailRes.status === "fulfilled" ? emailRes.value.dispatchedList : [];
+      const waCount = waRes.status === "fulfilled" ? waRes.value.dispatchedCount : 0;
 
       res.json({
         success: true,
-        message: `🚨 Emergency Alert re-broadcasted! Successfully delivered to ${dispatchedCount} members & volunteers via Email & WhatsApp.`,
+        message: `🚨 Emergency Alert re-broadcasted! Successfully delivered to ${dispatchedCount} emails and ${waCount} WhatsApp numbers.`,
         dispatched_recipients: dispatchedList,
         emails_dispatched: dispatchedCount,
+        whatsapp_dispatched: waCount,
       });
     } catch (err) {
       console.error("Rebroadcast Error:", err);
