@@ -3,24 +3,51 @@
 ===================================================== */
 
 const header = `
-  <div style="font-family:Arial,sans-serif;background:#f4f6f8;padding:30px">
-    <div style="max-width:550px;margin:auto;background:#ffffff;padding:25px;border-radius:8px">
-      <h2 style="color:#0d47a1;text-align:center;margin-bottom:5px">
-        HINDUSWARAJ YOUTH WELFARE ASSOCIATION
-      </h2>
-      <p style="text-align:center;font-size:13px;color:#555">
-        H.No. 4-1-140, Vani Nagar, Jagtial – 505327<br/>
-        📞 8499878425 | 📧 hinduswarajyouth@gmail.com
-      </p>
-      <hr/>
+  <div style="font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background-color:#0b1320;padding:30px 15px;margin:0;color:#1e293b;">
+    <div style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,0.35);border:1px solid #1e3a5f;">
+      <!-- TOP GOLD STRIPE -->
+      <div style="height:5px;background:linear-gradient(90deg, #b45309 0%, #d4af37 30%, #fef08a 50%, #d4af37 70%, #b45309 100%);"></div>
+      
+      <!-- BRAND HEADER BLOCK -->
+      <div style="background:linear-gradient(135deg, #091929 0%, #0f2942 60%, #163659 100%);padding:24px 20px 20px 20px;text-align:center;">
+        <img src="https://www.hinduswarajyouth.online/images/logo_v2.png" alt="HSYWA Logo" style="width:72px;height:auto;margin-bottom:12px;filter:drop-shadow(0 2px 8px rgba(0,0,0,0.4));" />
+        <h1 style="color:#ffffff;font-size:17px;letter-spacing:0.8px;margin:0 0 4px 0;font-weight:800;text-transform:uppercase;">
+          HINDUSWARAJ YOUTH WELFARE ASSOCIATION
+        </h1>
+        <div style="color:#f59e0b;font-size:13px;font-weight:700;margin-bottom:8px;letter-spacing:0.3px;">
+          హిందూ స్వరాజ్ యూత్ వెల్ఫేర్ అసోసియేషన్
+        </div>
+        <div style="display:inline-block;background:rgba(255,255,255,0.1);border:1px solid rgba(212,175,55,0.4);border-radius:20px;padding:3px 12px;color:#fef08a;font-size:10.5px;font-weight:600;letter-spacing:0.5px;">
+          Govt. Regd. Society No: 784/2025 • Jagtial, Telangana
+        </div>
+      </div>
+
+      <!-- MAIN BODY CONTAINER -->
+      <div style="padding:28px 25px 20px 25px;">
 `;
 
 const footer = `
-      <br/>
-      <p style="font-size:13px;color:#555">
-        Regards,<br/>
-        <b>HSY Admin Team</b>
-      </p>
+      </div>
+
+      <!-- OFFICIAL BRAND FOOTER -->
+      <div style="background:#091929;border-top:1px solid #1e3a5f;padding:22px 20px;text-align:center;color:#94a3b8;font-size:11.5px;line-height:1.7;">
+        <div style="color:#f59e0b;font-weight:700;font-size:12.5px;margin-bottom:4px;">
+          HINDUSWARAJ YOUTH WELFARE ASSOCIATION
+        </div>
+        <div style="color:#cbd5e1;font-size:11.5px;margin-bottom:8px;">
+          📍 Registered Office: H.No. 4-1-140, Vani Nagar, Jagtial, Telangana – 505327
+        </div>
+        <div style="color:#94a3b8;font-size:11px;margin-bottom:12px;">
+          📞 Helpline: <b>+91 84998 78425</b> &nbsp;|&nbsp; 📧 Email: <b>hinduswarajyouth@gmail.com</b><br/>
+          🌐 Web: <a href="https://www.hinduswarajyouth.online" style="color:#38bdf8;text-decoration:none;">www.hinduswarajyouth.online</a>
+        </div>
+        <div style="height:1px;background:rgba(255,255,255,0.1);margin:12px 0;"></div>
+        <div style="font-size:10px;color:#64748b;">
+          This is an official computer-generated communication from Hindu Swaraj Youth Welfare Association.
+        </div>
+      </div>
+      <!-- BOTTOM GOLD STRIPE -->
+      <div style="height:4px;background:linear-gradient(90deg, #b45309 0%, #d4af37 50%, #b45309 100%);"></div>
     </div>
   </div>
 `;
@@ -296,95 +323,122 @@ exports.publicDonationReceiptTemplate = ({
 }) => `
 ${header}
 
-<h3 style="color:#2e7d32">🙏 Donation Receipt – Thank You</h3>
-
-<p>Dear <b>${name}</b>,</p>
-
-<p>
-Thank you for your generous contribution to
-<b>Hinduswaraj Youth Welfare Association</b>.
-Your donation has been successfully received and officially approved.
-</p>
-
-<p>
-This email serves as the official acknowledgement of your donation.
-Please find your receipt details below.
-</p>
-
-<h4>🧾 Receipt Details</h4>
-
-<table style="width:100%;border-collapse:collapse;margin:15px 0">
-  <tr><td><b>Receipt Number</b></td><td>${receiptNo}</td></tr>
-  <tr><td><b>Donor Name</b></td><td>${name}</td></tr>
-  <tr><td><b>Fund</b></td><td>${fund}</td></tr>
-  <tr><td><b>Amount</b></td><td>₹ ${Number(amount).toLocaleString("en-IN")}</td></tr>
-  <tr><td><b>Date</b></td><td>${date}</td></tr>
-</table>
-
-<p>
-Your official QR-verified PDF receipt is attached to this email.
-You may use it for your records, accounting, or audit purposes.
-</p>
-
-<div style="background:#eef3ff;padding:14px;border-radius:6px;margin:20px 0">
-  <p>🔐 You can verify the authenticity of this receipt here:</p>
-  <p style="text-align:center">
-    <a href="${verifyUrl}"
-       style="background:#0d47a1;color:#fff;padding:10px 18px;
-              text-decoration:none;border-radius:6px;font-weight:bold">
-      Verify Receipt
-    </a>
-  </p>
+<!-- HERO ACKNOWLEDGMENT BANNER -->
+<div style="text-align:center;margin-bottom:24px;">
+  <span style="display:inline-block;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;padding:5px 16px;border-radius:24px;font-size:11.5px;font-weight:700;letter-spacing:0.5px;margin-bottom:10px;">
+    ✓ OFFICIAL CONTRIBUTION VOUCHER • అధికారిక రసీదు
+  </span>
+  <h2 style="color:#0f2942;margin:6px 0 4px 0;font-size:22px;font-weight:800;">
+    🙏 Thank You for Your Noble Seva
+  </h2>
+  <div style="color:#d97706;font-size:15px;font-weight:700;">
+    మీ విలువైన విరాళానికి మా హృదయపూర్వక ధన్యవాదాలు
+  </div>
 </div>
 
-<hr/>
-
-<h3 style="color:#0d47a1;font-family:Noto Sans Telugu,Arial">
-🙏 మీ విరాళానికి ధన్యవాదాలు
-</h3>
-
-<p style="font-family:Noto Sans Telugu,Arial">
-ప్రియమైన <b>${name}</b> గారికి,
+<p style="font-size:14px;color:#334155;line-height:1.7;margin:0 0 10px 0;">
+  Dear / ప్రియమైన <b>${name}</b> గారికి,
 </p>
 
-<p style="font-family:Noto Sans Telugu,Arial;line-height:1.8">
-
-హిందూ స్వరాజ్ యూత్ వెల్ఫేర్ అసోసియేషన్ కి మీరు చేసిన విలువైన విరాళానికి
-మా హృదయపూర్వక ధన్యవాదాలు.
-మీ విరాళం విజయవంతంగా స్వీకరించబడింది మరియు అధికారికంగా ఆమోదించబడింది.
+<p style="font-size:13.5px;color:#475569;line-height:1.7;margin:0 0 18px 0;">
+  Thank you for your generous contribution to <b>Hinduswaraj Youth Welfare Association</b>. Your support empowers our social welfare, emergency relief, and dharmic seva initiatives in Jagtial. Your donation has been successfully received and officially recorded.
+  <br/><br/>
+  <span style="color:#1e293b;font-weight:500;">
+  హిందూ స్వరాజ్ యూత్ వెల్ఫేర్ అసోసియేషన్ కి మీరు అందించిన పవిత్రమైన విరాళం విజయవంతంగా స్వీకరించబడింది మరియు లెక్కలలో నమోదు చేయబడింది. సమాజ సేవలో మీ భాగస్వామ్యం ఎంతో అమూల్యమైనది.
+  </span>
 </p>
 
-<p style="font-family:Noto Sans Telugu,Arial;line-height:1.8">
-ఈ ఇమెయిల్ మీ విరాళానికి సంబంధించిన అధికారిక రసీదు ధృవీకరణగా పంపబడింది.
-క్రింద మీ రసీదు వివరాలు ఇవ్వబడ్డాయి.
-</p>
+<!-- HIGHLIGHT DONATION CARD -->
+<div style="background:linear-gradient(180deg, #fffdf8 0%, #fffbf0 100%);border:1.5px solid #d4af37;border-radius:12px;padding:20px;margin:22px 0;box-shadow:0 4px 14px rgba(212,175,55,0.15);">
+  
+  <!-- AMOUNT DISPLAY -->
+  <div style="text-align:center;padding-bottom:16px;border-bottom:1px dashed #cbd5e1;margin-bottom:16px;">
+    <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">
+      Total Donation Amount / విరాళం మొత్తం
+    </div>
+    <div style="font-size:32px;font-weight:900;color:#047857;letter-spacing:-0.5px;">
+      ₹ ${Number(amount).toLocaleString("en-IN")}.00
+    </div>
+    <div style="display:inline-block;background:#ecfdf5;color:#065f46;padding:3px 12px;border-radius:12px;font-size:11px;font-weight:700;margin-top:6px;">
+      ● PAYMENT STATUS: SUCCESS / విజయవంతమైంది
+    </div>
+  </div>
 
-<table style="width:100%;border-collapse:collapse;font-family:Noto Sans Telugu,Arial">
-  <tr><td><b>రసీదు సంఖ్య</b></td><td>${receiptNo}</td></tr>
-  <tr><td><b>దాత పేరు</b></td><td>${name}</td></tr>
-  <tr><td><b>ఫండ్</b></td><td>${fund}</td></tr>
-  <tr><td><b>విరాళం మొత్తం</b></td><td>₹ ${Number(amount).toLocaleString("en-IN")}</td></tr>
-  <tr><td><b>తేదీ</b></td><td>${date}</td></tr>
-</table>
-
-<p style="font-family:Noto Sans Telugu,Arial;line-height:1.8">
-ఈ ఇమెయిల్‌కు జతచేయబడిన PDF రసీదు QR కోడ్ ద్వారా ధృవీకరించబడింది.
-మీ రికార్డుల కోసం దీనిని ఉపయోగించుకోవచ్చు.
-</p>
-
-<div style="background:#e8f5e9;padding:14px;border-radius:6px;margin:20px 0">
-  <p style="font-family:Noto Sans Telugu,Arial">
-    🔐 మీ రసీదును ధృవీకరించడానికి ఇక్కడ క్లిక్ చేయండి:
-    
-  </p>
-  <p style="text-align:center">
-    <a href="${verifyUrl}"
-       style="background:#2e7d32;color:#fff;padding:10px 18px;
-              text-decoration:none;border-radius:6px;font-weight:bold">
-      రసీదు ధృవీకరణ
-    </a>
-  </p>
+  <!-- TABLE DETAILS -->
+  <table style="width:100%;border-collapse:collapse;font-size:13px;color:#1e293b;">
+    <tr style="border-bottom:1px solid #f1f5f9;">
+      <td style="padding:9px 6px;color:#64748b;font-weight:600;width:42%;">
+        Receipt Number / రసీదు సంఖ్య:
+      </td>
+      <td style="padding:9px 6px;font-weight:700;color:#0f2942;font-family:monospace;font-size:13.5px;">
+        ${receiptNo}
+      </td>
+    </tr>
+    <tr style="border-bottom:1px solid #f1f5f9;background:rgba(248,250,252,0.6);">
+      <td style="padding:9px 6px;color:#64748b;font-weight:600;">
+        Donor Name / దాత పేరు:
+      </td>
+      <td style="padding:9px 6px;font-weight:700;color:#0f172a;">
+        ${name}
+      </td>
+    </tr>
+    <tr style="border-bottom:1px solid #f1f5f9;">
+      <td style="padding:9px 6px;color:#64748b;font-weight:600;">
+        Allocated Fund / సేవా విభాగం:
+      </td>
+      <td style="padding:9px 6px;font-weight:700;color:#1e40af;">
+        ${fund}
+      </td>
+    </tr>
+    <tr style="border-bottom:1px solid #f1f5f9;background:rgba(248,250,252,0.6);">
+      <td style="padding:9px 6px;color:#64748b;font-weight:600;">
+        Payment Mode / చెల్లింపు విధానం:
+      </td>
+      <td style="padding:9px 6px;font-weight:600;color:#047857;">
+        Razorpay Online (UPI / Cards)
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:9px 6px;color:#64748b;font-weight:600;">
+        Receipt Date / జారీ చేసిన తేదీ:
+      </td>
+      <td style="padding:9px 6px;font-weight:600;color:#334155;">
+        ${date}
+      </td>
+    </tr>
+  </table>
 </div>
+
+<!-- PDF RECEIPT ATTACHED BADGE -->
+<div style="background:#f8fafc;border:1px solid #e2e8f0;border-left:4px solid #0f2942;border-radius:6px;padding:14px;margin:18px 0;">
+  <div style="font-weight:700;color:#0f2942;font-size:13px;margin-bottom:4px;">
+    📎 Official PDF Receipt Attached to This Email
+  </div>
+  <div style="color:#475569;font-size:12px;line-height:1.6;">
+    మీ రసీదు యొక్క అధికారిక PDF ఫైల్ (డిజిటల్ సంతకాలు మరియు క్యూఆర్ కోడ్‌తో) ఈ ఇమెయిల్‌కు జతచేయబడింది. మీరు మీ రికార్డుల కొరకు లేదా ఆడిట్ కోసం దీనిని డౌన్‌లోడ్ చేసుకోవచ్చు.
+  </div>
+</div>
+
+<!-- LIVE VERIFY CTA -->
+<div style="background:linear-gradient(135deg, #091929 0%, #0f2942 100%);border-radius:10px;padding:20px;margin:22px 0;text-align:center;box-shadow:0 4px 16px rgba(15,41,66,0.2);">
+  <div style="color:#fef08a;font-size:12px;font-weight:700;letter-spacing:0.5px;margin-bottom:6px;">
+    🔐 LIVE DIGITAL VERIFICATION • రసీదు ధృవీకరణ
+  </div>
+  <p style="color:#ffffff;font-size:12.5px;margin:0 0 15px 0;line-height:1.5;">
+    Click below to verify this official receipt in real time on our official portal:
+  </p>
+  <div>
+    <a href="${verifyUrl}"
+       target="_blank"
+       style="display:inline-block;background:linear-gradient(90deg, #d4af37 0%, #f59e0b 100%);color:#0f2942;padding:12px 28px;text-decoration:none;border-radius:30px;font-weight:800;font-size:13.5px;letter-spacing:0.5px;box-shadow:0 4px 15px rgba(212,175,55,0.4);">
+      🔍 Verify Official Receipt / రసీదు ధృవీకరణ
+    </a>
+  </div>
+</div>
+
+<p style="font-size:11.5px;color:#64748b;line-height:1.6;margin:16px 0 0 0;text-align:center;">
+  Contributions to Hindu Swaraj Youth Welfare Association are utilized strictly for registered association objectives under Society Byelaws.
+</p>
 
 ${footer}
 `;
