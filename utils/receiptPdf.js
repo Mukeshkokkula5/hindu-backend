@@ -168,7 +168,7 @@ module.exports = async function generateReceiptPDF(res, receipt, returnBuffer = 
 
   doc.font("Helvetica").fontSize(7.5).fillColor("#475569")
      .text("Registered Under Telangana Societies Registration Act 35 of 2001", 115, 68, { align: "center", width: 440 })
-     .text("H.No. 4-2-123, Aravind Nagar, Jagtial, Telangana - 505327, India", 115, 79, { align: "center", width: 440 });
+     .text("H.No. 4-1-140, Vani Nagar, Jagtial, Telangana - 505327, India", 115, 79, { align: "center", width: 440 });
 
   doc.font("Helvetica-Bold").fontSize(7).fillColor("#0284c7")
      .text("Web: www.hinduswarajyouth.online   |   Email: hinduswarajyouth@gmail.com   |   Ph: +91 84998 78425", 115, 91, { align: "center", width: 440 });
@@ -393,7 +393,7 @@ module.exports = async function generateReceiptPDF(res, receipt, returnBuffer = 
 
   doc.font("Helvetica-Bold").fontSize(6.5).fillColor("#64748b")
      .text(
-       "HSYWA Registered Office: H.No. 4-2-123, Aravind Nagar, Jagtial, Telangana - 505327 • Official Helpline: +91 84998 78425 • Page 1 of 1",
+       "HSYWA Registered Office: H.No. 4-1-140, Vani Nagar, Jagtial, Telangana - 505327 • Official Helpline: +91 84998 78425 • Page 1 of 1",
        40, footY + 26, { align: "center", width: tableW - 10 }
      );
 

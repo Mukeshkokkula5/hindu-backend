@@ -9,7 +9,7 @@ const header = `
         HINDUSWARAJ YOUTH WELFARE ASSOCIATION
       </h2>
       <p style="text-align:center;font-size:13px;color:#555">
-        Aravind Nagar, Jagtial – 505327<br/>
+        H.No. 4-1-140, Vani Nagar, Jagtial – 505327<br/>
         📞 8499878425 | 📧 hinduswarajyouth@gmail.com
       </p>
       <hr/>
