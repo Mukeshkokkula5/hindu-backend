@@ -57,18 +57,18 @@ const upload = multer({
 router.post(
   "/upload",
   verifyToken,
-  checkRole("SUPER_ADMIN", "PRESIDENT"),
-  upload.single("image"),
+  upload.any(),
   (req, res) => {
     try {
-      if (!req.file) {
+      const uploadedFile = req.file || (req.files && req.files[0]);
+      if (!uploadedFile) {
         return res.status(400).json({ success: false, error: "No image file provided" });
       }
-      let fileUrl = `/uploads/${req.file.filename}`;
+      let fileUrl = `/uploads/${uploadedFile.filename}`;
       if (process.env.VERCEL || process.env.NODE_ENV === "production") {
-        if (req.file.path && fs.existsSync(req.file.path)) {
-          const b64 = fs.readFileSync(req.file.path).toString("base64");
-          const mime = req.file.mimetype || "image/jpeg";
+        if (uploadedFile.path && fs.existsSync(uploadedFile.path)) {
+          const b64 = fs.readFileSync(uploadedFile.path).toString("base64");
+          const mime = uploadedFile.mimetype || "image/jpeg";
           fileUrl = `data:${mime};base64,${b64}`;
         }
       }
