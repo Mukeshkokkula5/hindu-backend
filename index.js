@@ -524,11 +524,11 @@ app.use("/aapadbandhava", require("./routes/aapadbandhava"));
 app.use("/community", require("./routes/community"));
 app.use("/whatsapp", require("./routes/whatsapp"));
 
-// Initialize WhatsApp Gateway on server start (in long-running Node environments)
-if (!process.env.VERCEL) {
-  const { initWhatsApp } = require("./services/whatsappBot");
-  initWhatsApp().catch((err) => console.warn("WhatsApp initial connection notice:", err.message));
-}
+// WhatsApp auto-init disabled per user directive
+// if (!process.env.VERCEL) {
+//   const { initWhatsApp } = require("./services/whatsappBot");
+//   initWhatsApp().catch((err) => console.warn("WhatsApp initial connection notice:", err.message));
+// }
 
 /* =========================
    🏠 ROOT & HEALTH
