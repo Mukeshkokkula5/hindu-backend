@@ -134,48 +134,75 @@ router.get("/public-pdf/:receiptNo", async (req, res) => {
 });
 
 /* =========================
-   👤 MEMBER PDF RECEIPT
+   📄 OFFICIAL PDF RECEIPT DOWNLOAD
 ========================= */
-router.get("/pdf/:receiptNo", verifyToken, async (req, res) => {
+router.get("/pdf/:receiptNo", async (req, res) => {
   try {
     const { receiptNo } = req.params;
 
+    const cleanOrderId = receiptNo.startsWith("HSYWA-")
+      ? receiptNo.replace(/^HSYWA-/, "order_")
+      : receiptNo;
+    const formattedReceiptNo = receiptNo.startsWith("order_")
+      ? receiptNo.replace(/^order_/, "HSYWA-")
+      : receiptNo;
+
+    const isOnline =
+      receiptNo.startsWith("order_") ||
+      receiptNo.startsWith("HSYWA-") ||
+      cleanOrderId.startsWith("order_");
+
+    if (isOnline) {
+      const { rows } = await pool.query(
+        `SELECT * FROM pg_transactions WHERE (order_id=$1 OR order_id=$2 OR payment_id=$1) AND (status='SUCCESS' OR status='APPROVED')`,
+        [receiptNo, cleanOrderId]
+      );
+      if (!rows.length) return res.status(404).send("Official receipt not found");
+      const r = rows[0];
+      const receipt = {
+        receipt_no: formattedReceiptNo,
+        name: r.payer_name,
+        fund_name: r.fund_type || "Youth & Community Welfare",
+        amount: r.amount,
+        receipt_date: r.created_at,
+        phone: r.mobile_number,
+        verifyUrl: `https://www.hinduswarajyouth.online/receipts/verify/${formattedReceiptNo}`,
+      };
+      return generateReceiptPDF(res, receipt);
+    }
+
+    // Otherwise check contributions table
     const { rows } = await pool.query(
       `SELECT c.receipt_no, c.amount, c.receipt_date,
-              u.name AS donor_name, f.fund_name, c.member_id
+              COALESCE(u.name, c.donor_name) AS donor_name,
+              f.fund_name, c.donor_phone, c.member_id
        FROM contributions c
-       JOIN users u ON u.id = c.member_id
+       LEFT JOIN users u ON u.id = c.member_id
        JOIN funds f ON f.id = c.fund_id
-       WHERE c.receipt_no=$1
-         AND c.status='APPROVED'
-         AND c.qr_locked=true`,
+       WHERE (c.receipt_no=$1 OR c.reference_no=$1 OR c.public_token=$1)
+         AND c.status='APPROVED'`,
       [receiptNo]
     );
 
-    if (!rows.length) return res.status(404).send("Receipt not found");
+    if (!rows.length) return res.status(404).send("Official receipt not found");
 
     const r = rows[0];
-
-    // 🔐 Member can download only his receipt
-    if (req.user.role === "MEMBER" && r.member_id !== req.user.id) {
-      return res.status(403).send("Access denied");
-    }
-
     const receipt = {
       receipt_no: r.receipt_no,
       name: r.donor_name,
       fund_name: r.fund_name,
       amount: r.amount,
       receipt_date: r.receipt_date,
-      verifyUrl: `${process.env.BASE_URL}/receipts/verify/${r.receipt_no}`,
+      phone: r.donor_phone,
+      verifyUrl: `https://www.hinduswarajyouth.online/receipts/verify/${r.receipt_no}`,
     };
 
-    // 🔥 SAME PROFESSIONAL PDF
     generateReceiptPDF(res, receipt);
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Server error");
+    console.error("PDF GENERATION ERROR 👉", err);
+    res.status(500).send("Server error generating PDF receipt");
   }
 });
 
 module.exports = router;
+
