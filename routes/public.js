@@ -134,7 +134,11 @@ router.get("/contribution/:token", async (req, res) => {
           REPLACE(pg.order_id, 'order_', 'HSYWA-') AS receipt_no
         FROM pg_transactions pg
         LEFT JOIN users u ON u.id = pg.member_id
-        WHERE pg.order_id = $1 OR pg.id::text = $1 OR pg.payment_id = $1
+        WHERE pg.order_id = $1 
+           OR pg.id::text = $1 
+           OR pg.payment_id = $1
+           OR REPLACE(pg.order_id, 'order_', 'HSYWA-') = $1
+           OR pg.order_id = REPLACE($1, 'HSYWA-', 'order_')
         `,
         [token]
       );

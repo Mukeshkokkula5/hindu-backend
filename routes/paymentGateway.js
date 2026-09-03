@@ -20,7 +20,7 @@ router.post("/create-order", async (req, res) => {
     const { payer_name, amount, email, mobile_number, address, fund_type, member_id } = req.body;
 
     const cleanMobile = mobile_number ? String(mobile_number).trim() : "";
-    const effectiveEmail = email && email.trim() ? email.trim() : `${cleanMobile || 'devotee'}@hinduswaraj.org`;
+    const effectiveEmail = email && email.trim() ? email.trim() : `${cleanMobile || 'devotee'}@hinduswarajyouth.online`;
     const effectiveAddress = address && address.trim() ? address.trim() : "Jagtial, Telangana";
 
     if (!payer_name || !amount || !cleanMobile || !fund_type) {

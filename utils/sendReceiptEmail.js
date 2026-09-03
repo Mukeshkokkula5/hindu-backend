@@ -13,7 +13,8 @@ module.exports = async function sendReceiptEmail(donation) {
       receipt_date,
     } = donation;
 
-    const verifyUrl = `${process.env.BASE_URL}/receipts/verify/${receipt_no}`;
+    const frontendBase = (process.env.FRONTEND_URL || "https://www.hinduswarajyouth.online").replace(/\/$/, "");
+    const verifyUrl = `${frontendBase}/receipts/${receipt_no}`;
 
     // Build receipt object for PDF
     const receipt = {

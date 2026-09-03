@@ -158,7 +158,7 @@ function extractYouTubeId(urlOrId) {
       await pool.query(`
         INSERT INTO navaratri_sponsors (name, category, tagline, offer_badge, shop_address, whatsapp_number, logo_url, contact_phone, website_url, amount_sponsored, is_active, display_order)
         VALUES
-        ('Sri Venkateshwara Swarna Kireetam & Jewellers', 'TITLE_SPONSOR', 'Official Swarna Kavacham & Grand Aarti Title Sponsor • Pure 916 KDM Gold & Silver Articles', '🌟 Special 15% Festive Making Charge Off', 'Main Road, Clock Tower Center, Jagtial', '+91 98480 12345', '/images/navaratri-ganesha.jpg', '+91 98480 12345', 'https://hinduswaraj.org', 50000, true, 1),
+        ('Sri Venkateshwara Swarna Kireetam & Jewellers', 'TITLE_SPONSOR', 'Official Swarna Kavacham & Grand Aarti Title Sponsor • Pure 916 KDM Gold & Silver Articles', '🌟 Special 15% Festive Making Charge Off', 'Main Road, Clock Tower Center, Jagtial', '+91 98480 12345', '/images/navaratri-ganesha.jpg', '+91 98480 12345', 'https://www.hinduswarajyouth.online', 50000, true, 1),
         ('Gayatri Agro & Modern Rice Industries', 'ANNADANAM_PATRON', 'Maha Annadanam Chief Patron • Sponsoring Daily Sacred Prasadam for 3,000+ Devotees', '🍲 Sona Masoori Rice Special Pack', 'Industrial Area, Bypass Road, Jagtial', '+91 94400 54321', '/images/navaratri-aarti.jpg', '+91 94400 54321', '', 35000, true, 2),
         ('Lakshmi Srinivasa Silk & Handloom Vastralaya', 'AARTI_SPONSOR', 'Divya Pattu Vastrams & Daily Pushpalankarana Partner • Jagtial', '🥻 Festive 20% Discount on Wedding Sarees', 'Beside Gandhi Chowk, Jagtial', '+91 99890 67890', '/images/navaratri-ganesha.jpg', '+91 99890 67890', '', 25000, true, 3),
         ('Balaji Pure Ghee Sweets & Bakery', 'SHOP_COMMERCIAL', 'Special 108 Modaka Nivedana, Kaju Katli & Pure Ghee Laddu Offer', '🍬 Buy 1kg Get 250g Free Festival Offer', 'Station Road, Near Bus Stand, Jagtial', '+91 98765 43210', '/images/logo_v2.png', '+91 98765 43210', '', 15000, true, 4),
@@ -740,7 +740,7 @@ router.post("/wishes", async (req, res) => {
 
                       <!-- Action Button -->
                       <div style="margin-top: 24px; text-align: center;">
-                        <a href="https://hinduswaraj.org/vinayaka-navaratri?token=${token_no}" target="_blank" style="display: inline-block; background: linear-gradient(135deg, #ff6b00 0%, #d4a017 100%); color: #ffffff; text-decoration: none; font-size: 14px; font-weight: 900; padding: 12px 28px; border-radius: 999px; box-shadow: 0 4px 15px rgba(255, 107, 0, 0.4); text-transform: uppercase; letter-spacing: 0.5px;">
+                        <a href="https://www.hinduswarajyouth.online/vinayaka-navaratri?token=${token_no}" target="_blank" style="display: inline-block; background: linear-gradient(135deg, #ff6b00 0%, #d4a017 100%); color: #ffffff; text-decoration: none; font-size: 14px; font-weight: 900; padding: 12px 28px; border-radius: 999px; box-shadow: 0 4px 15px rgba(255, 107, 0, 0.4); text-transform: uppercase; letter-spacing: 0.5px;">
                           🖨️ View &amp; Print Full Certificate (పూర్తి సర్టిఫికేట్ డౌన్‌లోడ్ చేసుకోండి) ↗
                         </a>
                       </div>

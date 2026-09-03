@@ -114,6 +114,33 @@ router.post(
 );
 
 /* =====================================================
+   ⚡ 4B. INTERNAL DIRECT WHATSAPP API (FOR CLOUD / DELEGATION)
+   POST /whatsapp/send-direct-api
+===================================================== */
+router.post("/send-direct-api", async (req, res) => {
+  try {
+    const { phone, message } = req.body;
+    if (!phone || !message) {
+      return res.status(400).json({ success: false, error: "Phone and message are required." });
+    }
+
+    const result = await sendDirectWhatsApp(phone, message);
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    res.json({
+      success: true,
+      message: `✅ Message delivered directly to ${phone}!`,
+      ...result,
+    });
+  } catch (err) {
+    console.error("WhatsApp send-direct-api error:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* =====================================================
    📢 5. CUSTOM ANNOUNCEMENT BROADCAST (ADMIN)
    POST /whatsapp/broadcast-custom
 ===================================================== */
