@@ -97,18 +97,34 @@ router.get("/public/members", async (req, res) => {
       SELECT 
         id,
         name,
-        role,
+        CASE 
+          WHEN UPPER(role) = 'PRESIDENT' THEN 'President'
+          WHEN UPPER(role) = 'VICE_PRESIDENT' THEN 'Vice President'
+          WHEN UPPER(role) = 'GENERAL_SECRETARY' THEN 'General Secretary'
+          WHEN UPPER(role) = 'JOINT_SECRETARY' THEN 'Joint Secretary'
+          WHEN UPPER(role) = 'TREASURER' THEN 'Treasurer'
+          WHEN UPPER(role) = 'EC_MEMBER' THEN 'Executive Committee Member'
+          ELSE 'Member'
+        END AS role,
         photo_url,
-        bio,
-        phone,
-        email,
-        social_fb,
-        social_insta,
-        social_linkedin,
-        social_twitter,
-        display_order
-      FROM association_members
-      WHERE show_on_website = true
+        NULL AS bio,
+        NULL AS phone,
+        NULL AS email,
+        NULL AS social_fb,
+        NULL AS social_insta,
+        NULL AS social_linkedin,
+        NULL AS social_twitter,
+        CASE 
+          WHEN UPPER(role) = 'PRESIDENT' THEN 1
+          WHEN UPPER(role) = 'VICE_PRESIDENT' THEN 2
+          WHEN UPPER(role) = 'GENERAL_SECRETARY' THEN 3
+          WHEN UPPER(role) = 'JOINT_SECRETARY' THEN 4
+          WHEN UPPER(role) = 'TREASURER' THEN 5
+          WHEN UPPER(role) = 'EC_MEMBER' THEN 6
+          ELSE 7
+        END AS display_order
+      FROM users
+      WHERE active = true AND role != 'SUPER_ADMIN'
       ORDER BY display_order ASC, id ASC
     `);
 

@@ -371,19 +371,7 @@ pool
         );
       `);
 
-      // Seed initial members if empty
-      const membersCount = await pool.query("SELECT COUNT(*) FROM association_members");
-      if (parseInt(membersCount.rows[0].count, 10) === 0) {
-        await pool.query(`
-          INSERT INTO association_members (name, role, photo_url, bio, phone, email, display_order, show_on_website)
-          VALUES
-          ('Rajesh Kumar', 'President', '/images/leader-president.png', 'Leading youth initiatives, community development and cultural activities in Jagtial.', '+91 8499878425', 'president@hinduswarajyouth.online', 1, true),
-          ('Suresh Reddy', 'Vice President', '/images/leader-vp.png', 'Spearheading blood donation drives and youth welfare programs.', '+91 9876543210', 'vp@hinduswarajyouth.online', 2, true),
-          ('Anil Sharma', 'General Secretary', '/images/leader-secretary.png', 'Coordinating community outreach, education support and meetings.', '+91 9876543211', 'secretary@hinduswarajyouth.online', 3, true),
-          ('Vikram Patel', 'Treasurer', '/images/leader-treasurer.png', 'Managing association funds with 100% financial transparency.', '+91 9876543212', 'treasurer@hinduswarajyouth.online', 4, true),
-          ('Karthik Rao', 'Executive Committee Member', '/images/leader-committee.png', 'Organizing volunteer activities, disaster relief and tree plantation drives.', '+91 9876543213', 'karthik@hinduswarajyouth.online', 5, true);
-        `);
-      }
+      // No fake members seeded; members are dynamically sourced from verified users table
 
       // Seed initial posts if empty
       const assocPostsCount = await pool.query("SELECT COUNT(*) FROM association_posts");

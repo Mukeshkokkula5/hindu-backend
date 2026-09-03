@@ -198,9 +198,9 @@ router.put(
           [userId]
         );
 
-        if (checkVP.rowCount > 0) {
+        if (checkVP.rowCount >= 2) {
           return res.status(400).json({
-            error: "Only one Vice President is allowed",
+            error: "Maximum of 2 Vice Presidents allowed",
           });
         }
       }
