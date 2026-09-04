@@ -55,8 +55,26 @@ router.post(
       if (!req.file) {
         return res.status(400).json({ error: "No bill/receipt file uploaded" });
       }
-      const fileUrl = `/uploads/bills/${req.file.filename}`;
-      res.json({ success: true, fileUrl });
+      let fileUrl = `/uploads/bills/${req.file.filename}`;
+      if (process.env.VERCEL || process.env.NODE_ENV === "production") {
+        if (req.file.path && fs.existsSync(req.file.path)) {
+          const b64 = fs.readFileSync(req.file.path).toString("base64");
+          const ext = path.extname(req.file.originalname || "").toLowerCase();
+          const mime = req.file.mimetype || (ext === ".pdf" ? "application/pdf" : "image/jpeg");
+          fileUrl = `data:${mime};base64,${b64}`;
+          try {
+            fs.unlinkSync(req.file.path);
+          } catch (_) {}
+        }
+      }
+      res.json({
+        success: true,
+        fileUrl,
+        url: fileUrl,
+        imageUrl: fileUrl,
+        photo_url: fileUrl,
+        filename: req.file.filename,
+      });
     } catch (err) {
       console.error("BILL UPLOAD ERROR 👉", err.message);
       res.status(500).json({ error: "Bill upload failed" });
@@ -259,9 +277,10 @@ router.put(
 
       const expense = expRes.rows[0];
 
-      // Non-admins can only edit PENDING or PASSED_BY_GS expenses
+      // Non-admins can edit PENDING or PASSED_BY_GS expenses, or re-attach/update bill on APPROVED expenses
       const isFullAdmin = req.user.role === "SUPER_ADMIN" || req.user.role === "PRESIDENT";
-      if (!isFullAdmin && expense.status !== "PENDING" && expense.status !== "PASSED_BY_GS") {
+      const isOnlyUpdatingBill = bill_url !== undefined && !amount && !title && !fund_id;
+      if (!isFullAdmin && expense.status !== "PENDING" && expense.status !== "PASSED_BY_GS" && !isOnlyUpdatingBill) {
         return res.status(403).json({ error: "Only PENDING or PASSED expenses can be edited by Treasurer" });
       }
 

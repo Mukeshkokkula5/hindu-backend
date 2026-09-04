@@ -96,8 +96,8 @@ app.use((req, res, next) => {
 /* =========================
    📦 BODY PARSERS
 ========================= */
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 /* =========================
    ⏱ RATE LIMITING
@@ -120,8 +120,10 @@ app.use(
    🗂 STATIC FILES
 ========================= */
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+app.use("/uploads/bills", express.static(path.join(__dirname, "uploads", "bills")));
 if (process.env.VERCEL || process.env.NODE_ENV === "production") {
   app.use("/uploads", express.static("/tmp"));
+  app.use("/uploads/bills", express.static("/tmp"));
   app.use("/uploads/blood", express.static("/tmp"));
   app.use("/uploads/signatures", express.static("/tmp"));
   app.use("/uploads/aapadbandhava", express.static("/tmp"));
