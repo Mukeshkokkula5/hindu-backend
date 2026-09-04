@@ -334,6 +334,24 @@ pool
         `);
       }
 
+      // Ensure funds with base_amount > 0 have initial balance recorded in ledger if ledger is empty for that fund
+      const unseededFunds = await pool.query(`
+        SELECT f.id, f.fund_name, f.base_amount
+        FROM funds f
+        WHERE f.base_amount > 0
+          AND NOT EXISTS (SELECT 1 FROM ledger l WHERE l.fund_id = f.id)
+      `);
+      for (const fund of unseededFunds.rows) {
+        const amt = Number(fund.base_amount);
+        if (amt > 0) {
+          await pool.query(`
+            INSERT INTO ledger (entry_type, source, source_id, fund_id, amount, balance_after, created_by)
+            VALUES ('CREDIT', 'INITIAL_BALANCE', $1, $2, $3, $4, 1)
+          `, [fund.id, fund.id, amt, amt]);
+          console.log(`✅ Seeded initial ledger balance for fund ${fund.fund_name} (₹${amt})`);
+        }
+      }
+
       // Association Members Table (Leadership & Team)
       await pool.query(`
         CREATE TABLE IF NOT EXISTS association_members (

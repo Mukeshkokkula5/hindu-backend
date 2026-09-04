@@ -378,7 +378,7 @@ router.post("/audit-committee", verifyToken, requireSuperAdmin, async (req, res)
       // Send official appointment notification email to appointed committee member with PIN & Magic Link
       const memberEmail = m.email || (m.user_id ? (await pool.query("SELECT personal_email, username FROM users WHERE id = $1", [m.user_id])).rows[0]?.personal_email : null);
       if (memberEmail) {
-        const magicAuditLink = `${process.env.BASE_URL || 'http://localhost:3000'}/audit?token=${authToken}&auditor=${encodeURIComponent(m.name)}`;
+        const magicAuditLink = `${(process.env.FRONTEND_URL || process.env.BASE_URL || 'https://www.hinduswarajyouth.online').replace(/\/$/, '')}/audit?token=${authToken}&auditor=${encodeURIComponent(m.name)}`;
         const emailHtml = `
           <div style="font-family: 'Segoe UI', Tahoma, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 14px; padding: 28px; background: #ffffff;">
             <div style="text-align: center; border-bottom: 2px solid #fdba74; padding-bottom: 18px;">
@@ -479,7 +479,7 @@ router.post("/audit/send-pin", async (req, res) => {
             <div style="font-size: 11px; color: #78350f;">Valid for the current statutory session &bull; Do not share with unauthorized persons.</div>
           </div>
 
-          <p style="font-size: 12px; color: #64748b;">Enter this PIN on <b>http://localhost:3000/audit</b> to authenticate your session.</p>
+          <p style="font-size: 12px; color: #64748b;">Enter this PIN on <b>${(process.env.FRONTEND_URL || process.env.BASE_URL || 'https://www.hinduswarajyouth.online').replace(/\/$/, '')}/audit</b> to authenticate your session.</p>
         </div>
       </div>
     `;

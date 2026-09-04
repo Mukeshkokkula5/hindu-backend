@@ -42,6 +42,62 @@ const isOfficeBearer = (req) => {
 };
 
 /* ======================================================
+   💳 HELPER: CREDIT SUBSCRIPTION INFLOW TO MONTHLY FUND
+====================================================== */
+async function creditSubscriptionToFund({ memberId, memberName, memberPhone, amount, paymentMode, receiptNo, note, source, userId }) {
+  try {
+    // 1. Find the Monthly Fixed Fund (or general active fund)
+    const fundRes = await pool.query(
+      `SELECT id, fund_name FROM funds 
+       WHERE status = 'ACTIVE' AND (fund_name ILIKE '%Monthly%' OR fund_type = 'MONTHLY')
+       ORDER BY id ASC LIMIT 1`
+    );
+    const fundId = fundRes.rows[0]?.id || null;
+
+    // 2. Insert into contributions
+    const contRes = await pool.query(
+      `
+      INSERT INTO contributions (
+        member_id, donor_name, donor_phone, fund_id, amount, payment_mode, receipt_no, receipt_date, status, payment_note, source, approved_at, qr_locked
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), 'APPROVED', $8, $9, NOW(), true)
+      RETURNING id
+      `,
+      [
+        memberId,
+        memberName || "Member",
+        memberPhone || null,
+        fundId,
+        amount,
+        paymentMode,
+        receiptNo,
+        note,
+        source,
+      ]
+    );
+
+    const contributionId = contRes.rows[0]?.id;
+
+    // 3. Credit ledger
+    if (fundId && contributionId) {
+      const balRes = await pool.query(
+        `SELECT COALESCE(balance_after, 0) AS balance FROM ledger WHERE fund_id = $1 ORDER BY id DESC LIMIT 1`,
+        [fundId]
+      );
+      const currentBalance = balRes.rows.length > 0 ? Number(balRes.rows[0].balance) : 0;
+      const newBalance = currentBalance + Number(amount);
+
+      await pool.query(
+        `INSERT INTO ledger (entry_type, source, source_id, fund_id, amount, balance_after, created_by)
+         VALUES ('CREDIT', 'CONTRIBUTION', $1, $2, $3, $4, $5)`,
+        [contributionId, fundId, amount, newBalance, userId || memberId || 1]
+      );
+    }
+  } catch (err) {
+    console.warn("Subscription fund ledger credit notice:", err.message);
+  }
+}
+
+/* ======================================================
    🔌 DATABASE AUTO-MIGRATIONS FOR SUBSCRIPTIONS
 ====================================================== */
 (async () => {
@@ -591,22 +647,18 @@ router.post("/verify-online-payment", verifyToken, async (req, res) => {
       ).catch(() => {});
     }
 
-    // Mirror to contributions
-    await pool.query(
-      `
-      INSERT INTO contributions (
-        member_id, donor_name, donor_phone, amount, payment_mode, receipt_no, receipt_date, status, payment_note, source
-      ) VALUES ($1, $2, $3, $4, 'ONLINE_RAZORPAY', $5, NOW(), 'APPROVED', $6, 'MONTHLY_SUBSCRIPTION_ONLINE')
-      `,
-      [
-        req.user.id,
-        req.user.name || "Member",
-        req.user.phone || null,
-        amount,
-        receiptNo,
-        `Online Razorpay Subscription for ${targetMonth} (${paymentId}) - Youth Dev 50%, Emergency 30%, Public Seva 20%`,
-      ]
-    ).catch((e) => console.warn("Contribution mirror warning:", e.message));
+    // Mirror to contributions & credit Monthly Fixed Fund in ledger
+    await creditSubscriptionToFund({
+      memberId: req.user.id,
+      memberName: req.user.name || "Member",
+      memberPhone: req.user.phone || null,
+      amount,
+      paymentMode: "ONLINE_RAZORPAY",
+      receiptNo,
+      note: `Online Razorpay Subscription for ${targetMonth} (${paymentId}) - Youth Dev 50%, Emergency 30%, Public Seva 20%`,
+      source: "MONTHLY_SUBSCRIPTION_ONLINE",
+      userId: req.user.id,
+    });
 
     res.json({
       success: true,
@@ -663,23 +715,18 @@ router.post("/pay-dues", verifyToken, async (req, res) => {
       [req.user.id, targetMonth, amount, payment_mode, receiptNo, transaction_id || `TXN-SUB-${Date.now()}`]
     );
 
-    // Record in contributions for transparency
-    await pool.query(
-      `
-      INSERT INTO contributions (
-        member_id, donor_name, donor_phone, amount, payment_mode, receipt_no, receipt_date, status, payment_note, source
-      ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), 'APPROVED', $7, 'MONTHLY_SUBSCRIPTION')
-      `,
-      [
-        req.user.id,
-        req.user.name || "Member",
-        req.user.phone || null,
-        amount,
-        payment_mode,
-        receiptNo,
-        `Monthly Subscription for ${targetMonth} (Youth Dev 50%, Emergency 30%, Public Seva 20%)`,
-      ]
-    ).catch((e) => console.warn("Contribution mirror warning:", e.message));
+    // Record in contributions & credit Monthly Fixed Fund in ledger
+    await creditSubscriptionToFund({
+      memberId: req.user.id,
+      memberName: req.user.name || "Member",
+      memberPhone: req.user.phone || null,
+      amount,
+      paymentMode: payment_mode,
+      receiptNo,
+      note: `Monthly Subscription for ${targetMonth} (Youth Dev 50%, Emergency 30%, Public Seva 20%)`,
+      source: "MONTHLY_SUBSCRIPTION",
+      userId: req.user.id,
+    });
 
     res.json({
       success: true,
@@ -741,24 +788,18 @@ router.post("/record-offline", verifyToken, async (req, res) => {
       [user_id, month_year, fee, payment_mode, receiptNo, req.user.id, notes || "Cash payment verified by office bearer"]
     );
 
-    // Mirror to contributions
-    await pool.query(
-      `
-      INSERT INTO contributions (
-        member_id, donor_name, donor_phone, amount, payment_mode, receipt_no, receipt_date, status, payment_note, source, approved_by, approved_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), 'APPROVED', $7, 'MONTHLY_SUBSCRIPTION_OFFLINE', $8, NOW())
-      `,
-      [
-        user_id,
-        member.name,
-        member.phone || null,
-        fee,
-        payment_mode,
-        receiptNo,
-        `Offline Monthly Subscription for ${month_year} - Recorded by ${req.user.name || req.user.role}`,
-        req.user.id,
-      ]
-    ).catch((e) => console.warn("Contribution mirror warning:", e.message));
+    // Mirror to contributions & credit Monthly Fixed Fund in ledger
+    await creditSubscriptionToFund({
+      memberId: user_id,
+      memberName: member.name,
+      memberPhone: member.phone || null,
+      amount: fee,
+      paymentMode: payment_mode,
+      receiptNo,
+      note: `Offline Monthly Subscription for ${month_year} - Recorded by ${req.user.name || req.user.role}`,
+      source: "MONTHLY_SUBSCRIPTION_OFFLINE",
+      userId: req.user.id,
+    });
 
     // Send direct WhatsApp Official Receipt in background
     try {

@@ -106,20 +106,28 @@ router.post("/webhook", express.raw({ type: 'application/json' }), async (req, r
         );
         console.log(`✅ Payment successful for order: ${order_id}`);
 
-        // Send Email Receipt
         if (rows.length > 0) {
           const transaction = rows[0];
+
+          // 💳 Automatically credit the selected fund in ledger and mirror to contributions
+          await recordAndCreditDonation(transaction);
+
+          // Send Email Receipt
           const formattedReceiptNo = transaction.order_id
             ? transaction.order_id.replace(/^order_/, "HSYWA-")
             : `HSYWA-${String(transaction.id).padStart(6, "0")}`;
-          await sendReceiptEmail({
-            donor_email: transaction.email,
-            donor_name: transaction.payer_name,
-            receipt_no: formattedReceiptNo,
-            amount: transaction.amount,
-            fund_name: transaction.fund_type,
-            receipt_date: transaction.created_at,
-          });
+          try {
+            await sendReceiptEmail({
+              donor_email: transaction.email,
+              donor_name: transaction.payer_name,
+              receipt_no: formattedReceiptNo,
+              amount: transaction.amount,
+              fund_name: transaction.fund_type,
+              receipt_date: transaction.created_at,
+            });
+          } catch (mailErr) {
+            console.warn("Receipt email warning 👉", mailErr.message);
+          }
         }
       }
 
@@ -132,6 +140,103 @@ router.post("/webhook", express.raw({ type: 'application/json' }), async (req, r
     res.status(500).json({ error: "Webhook failed" });
   }
 });
+
+/* =====================================================
+   🔹 HELPER: RECORD & CREDIT DONATION TO CHOSEN FUND
+===================================================== */
+async function recordAndCreditDonation(transaction) {
+  if (!transaction || !transaction.amount) return null;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Prevent duplicate processing if already credited
+    const refKey = transaction.order_id || `PG-${transaction.id}`;
+    const existing = await client.query(
+      "SELECT id FROM contributions WHERE reference_no = $1",
+      [refKey]
+    );
+    if (existing.rows.length > 0) {
+      await client.query("COMMIT");
+      return existing.rows[0].id;
+    }
+
+    // 1. Resolve fund_id matching the selected fund_type
+    const fundRes = await client.query(
+      `SELECT id, fund_name FROM funds 
+       WHERE status = 'ACTIVE' 
+         AND (fund_name ILIKE $1 OR fund_type ILIKE $1)
+       ORDER BY (CASE WHEN fund_name ILIKE $1 THEN 1 ELSE 2 END) ASC
+       LIMIT 1`,
+      [transaction.fund_type || ""]
+    );
+
+    let fundId = fundRes.rows[0]?.id;
+
+    // Fallback: If no direct match, get the first active fund
+    if (!fundId) {
+      const defaultFund = await client.query(
+        "SELECT id, fund_name FROM funds WHERE status = 'ACTIVE' ORDER BY id ASC LIMIT 1"
+      );
+      fundId = defaultFund.rows[0]?.id || null;
+    }
+
+    const formattedReceiptNo = transaction.order_id
+      ? transaction.order_id.replace(/^order_/, "HSYWA-")
+      : `HSYWA-${String(transaction.id).padStart(6, "0")}`;
+
+    // 2. Insert into contributions
+    const contRes = await client.query(
+      `
+      INSERT INTO contributions (
+        member_id, donor_name, donor_phone, donor_email, fund_id, amount,
+        payment_mode, reference_no, status, source, receipt_date, receipt_no, approved_at, qr_locked
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, 'ONLINE_RAZORPAY', $7, 'APPROVED', 'PUBLIC_ONLINE', NOW(), $8, NOW(), true)
+      RETURNING id
+      `,
+      [
+        transaction.member_id || null,
+        transaction.payer_name || "Online Devotee",
+        transaction.mobile_number || null,
+        transaction.email || null,
+        fundId,
+        transaction.amount,
+        refKey,
+        formattedReceiptNo,
+      ]
+    );
+
+    const contributionId = contRes.rows[0].id;
+
+    // 3. Insert CREDIT entry into ledger for that exact fund
+    if (fundId) {
+      const balRes = await client.query(
+        `SELECT COALESCE(balance_after, 0) AS balance FROM ledger WHERE fund_id = $1 ORDER BY id DESC LIMIT 1 FOR UPDATE`,
+        [fundId]
+      );
+      const currentBalance = balRes.rows.length > 0 ? Number(balRes.rows[0].balance) : 0;
+      const newBalance = currentBalance + Number(transaction.amount);
+
+      await client.query(
+        `
+        INSERT INTO ledger (entry_type, source, source_id, fund_id, amount, balance_after, created_by)
+        VALUES ('CREDIT', 'CONTRIBUTION', $1, $2, $3, $4, $5)
+        `,
+        [contributionId, fundId, transaction.amount, newBalance, transaction.member_id || 1]
+      );
+    }
+
+    await client.query("COMMIT");
+    return contributionId;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("CREDIT ONLINE DONATION ERROR 👉", err.message);
+    return null;
+  } finally {
+    client.release();
+  }
+}
 
 /* =====================================================
    2.5️⃣ MANUAL VERIFICATION (Frontend Fallback)
@@ -162,9 +267,13 @@ router.post("/verify", express.json(), async (req, res) => {
         [paymentId, razorpay_order_id]
       );
 
-      // Send Email Receipt
       if (rows.length > 0 && rows[0].status === 'SUCCESS') {
         const transaction = rows[0];
+
+        // 💳 Automatically credit the selected fund in ledger and mirror to contributions
+        await recordAndCreditDonation(transaction);
+
+        // Send Email Receipt
         const formattedReceiptNo = transaction.order_id
           ? transaction.order_id.replace(/^order_/, "HSYWA-")
           : `HSYWA-${String(transaction.id).padStart(6, "0")}`;

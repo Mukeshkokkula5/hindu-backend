@@ -600,7 +600,7 @@ router.post("/emergency-request", verifyToken, async (req, res) => {
             As an Executive Committee Member, please log in to the portal and cast your electronic vote (YES/NO) to sanction this emergency relief.
           </p>
           <div style="text-align: center; margin-top: 20px;">
-            <a href="http://localhost:3000/admin" style="background: #1e293b; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 800; display: inline-block;">
+            <a href="${(process.env.FRONTEND_URL || process.env.BASE_URL || 'https://www.hinduswarajyouth.online').replace(/\/$/, '')}/admin" style="background: #1e293b; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 800; display: inline-block;">
               🗳️ Cast Your Vote in Portal
             </a>
           </div>

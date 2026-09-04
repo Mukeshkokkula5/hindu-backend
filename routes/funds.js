@@ -29,7 +29,7 @@ router.get(
             SELECT l.balance_after
             FROM ledger l
             WHERE l.fund_id = f.id
-            ORDER BY l.created_at DESC
+            ORDER BY l.id DESC
             LIMIT 1
           ), 0) AS balance,
 
@@ -60,6 +60,7 @@ router.post(
   verifyToken,
   checkRole("SUPER_ADMIN", "PRESIDENT"),
   async (req, res) => {
+    const client = await pool.connect();
     try {
       const { fund_name, fund_type, description, base_amount } = req.body;
 
@@ -70,7 +71,9 @@ router.post(
       const parsedBaseAmount = base_amount !== undefined ? Number(base_amount) : 
         (description && description.startsWith("Base Amount: ") ? Number(description.replace("Base Amount: ", "")) : 0);
 
-      const result = await pool.query(
+      await client.query("BEGIN");
+
+      const result = await client.query(
         `
         INSERT INTO funds (fund_name, fund_type, description, base_amount, status)
         VALUES ($1, $2, $3, $4, 'ACTIVE')
@@ -79,12 +82,30 @@ router.post(
         [fund_name, fund_type, description || null, parsedBaseAmount]
       );
 
+      const newFund = result.rows[0];
+
+      // Automatically credit initial starting balance to ledger if base_amount > 0
+      if (parsedBaseAmount > 0) {
+        await client.query(
+          `
+          INSERT INTO ledger (entry_type, source, source_id, fund_id, amount, balance_after, created_by)
+          VALUES ('CREDIT', 'INITIAL_BALANCE', $1, $2, $3, $4, $5)
+          `,
+          [newFund.id, newFund.id, parsedBaseAmount, parsedBaseAmount, req.user.id]
+        );
+      }
+
+      await client.query("COMMIT");
+
       const logAudit = require("../utils/auditLogger");
-      await logAudit("CREATE", "FUND", result.rows[0].id, req.user.id);
-      res.status(201).json(result.rows[0]);
+      await logAudit("CREATE", "FUND", newFund.id, req.user.id);
+      res.status(201).json(newFund);
     } catch (err) {
+      await client.query("ROLLBACK");
       console.error("ADD FUND ERROR 👉", err.message);
-      res.status(500).json({ error: "Server error" });
+      res.status(500).json({ error: "Server error: " + err.message });
+    } finally {
+      client.release();
     }
   }
 );
@@ -137,7 +158,7 @@ router.get("/list", verifyToken, async (req, res) => {
           SELECT l.balance_after
           FROM ledger l
           WHERE l.fund_id = f.id
-          ORDER BY l.created_at DESC
+          ORDER BY l.id DESC
           LIMIT 1
         ), 0) AS balance
       FROM funds f
@@ -163,6 +184,17 @@ router.delete(
     try {
       const fundId = req.params.id;
 
+      // Check if any expenses are linked to this fund
+      const expCheck = await pool.query(
+        "SELECT COUNT(*) FROM expenses WHERE fund_id = $1",
+        [fundId]
+      );
+      if (parseInt(expCheck.rows[0].count, 10) > 0) {
+        return res.status(400).json({
+          error: "Cannot delete this fund because expenses are linked to it. Please deactivate the fund instead.",
+        });
+      }
+
       // Remove all ledger entries first
       await pool.query("DELETE FROM ledger WHERE fund_id = $1", [fundId]);
 
@@ -184,7 +216,7 @@ router.delete(
       res.json({ message: "Fund deleted permanently" });
     } catch (err) {
       console.error("DELETE FUND ERROR 👉", err.message);
-      res.status(500).json({ error: "Server error" });
+      res.status(500).json({ error: "Server error: " + err.message });
     }
   }
 );
