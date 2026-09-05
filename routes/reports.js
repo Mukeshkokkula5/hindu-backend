@@ -281,22 +281,25 @@ function renderPdfFooterAndSignatures(doc, meta) {
     .stroke();
 
   // President Sign block
-  doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#0f172a").text("PRESIDENT", 60, bottomY + 30, { align: "left" });
-  doc.font("Helvetica").fontSize(7.5).fillColor("#64748b").text("Hindu Swaraj Youth", 60, bottomY + 42, { align: "left" });
+  doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#0f172a").text("PRESIDENT", 60, bottomY + 30, { align: "left", lineBreak: false });
+  doc.font("Helvetica").fontSize(7.5).fillColor("#64748b").text("Hindu Swaraj Youth", 60, bottomY + 42, { align: "left", lineBreak: false });
 
   // Official Seal in center
-  doc.font("Helvetica-Bold").fontSize(8).fillColor("#580505").text("[ ASSOCIATION SEAL ]", doc.page.width / 2 - 50, bottomY + 30, { width: 100, align: "center" });
+  doc.font("Helvetica-Bold").fontSize(8).fillColor("#580505").text("[ ASSOCIATION SEAL ]", doc.page.width / 2 - 50, bottomY + 30, { width: 100, align: "center", lineBreak: false });
 
   // Treasurer Sign block
-  doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#0f172a").text("TREASURER", doc.page.width - 150, bottomY + 30, { align: "right", width: 90 });
-  doc.font("Helvetica").fontSize(7.5).fillColor("#64748b").text("Hindu Swaraj Youth", doc.page.width - 150, bottomY + 42, { align: "right", width: 90 });
+  doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#0f172a").text("TREASURER", doc.page.width - 150, bottomY + 30, { align: "right", width: 90, lineBreak: false });
+  doc.font("Helvetica").fontSize(7.5).fillColor("#64748b").text("Hindu Swaraj Youth", doc.page.width - 150, bottomY + 42, { align: "right", width: 90, lineBreak: false });
 
   // Page Numbers
   const range = doc.bufferedPageRange();
   for (let i = range.start; i < range.start + range.count; i++) {
     doc.switchToPage(i);
+    const prevBottom = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0;
     doc.font("Helvetica").fontSize(7.5).fillColor("#94a3b8")
-      .text(`Page ${i + 1} of ${range.count} • Official Financial Record`, 40, doc.page.height - 25, { align: "center" });
+      .text(`Page ${i + 1} of ${range.count} • Official Financial Record`, 40, doc.page.height - 25, { align: "center", lineBreak: false });
+    doc.page.margins.bottom = prevBottom;
   }
 }
 
@@ -364,17 +367,17 @@ router.get("/pdf/monthly", async (req, res) => {
     // Box 1: Total Collections
     doc.rect(40, startY, boxWidth, 42).fillAndStroke("#f0fdf4", "#86efac");
     doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#15803d").text("TOTAL COLLECTIONS", 50, startY + 8);
-    doc.font("Helvetica-Bold").fontSize(11).fillColor("#166534").text(`₹ ${formatINR(totalCollected)}`, 50, startY + 22);
+    doc.font("Helvetica-Bold").fontSize(11).fillColor("#166534").text(`Rs. ${formatINR(totalCollected)}`, 50, startY + 22);
 
     // Box 2: Total Expenses
     doc.rect(40 + boxWidth + 10, startY, boxWidth, 42).fillAndStroke("#fef2f2", "#fca5a5");
     doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#b91c1c").text("TOTAL EXPENDITURE", 40 + boxWidth + 20, startY + 8);
-    doc.font("Helvetica-Bold").fontSize(11).fillColor("#991b1b").text(`₹ ${formatINR(totalSpent)}`, 40 + boxWidth + 20, startY + 22);
+    doc.font("Helvetica-Bold").fontSize(11).fillColor("#991b1b").text(`Rs. ${formatINR(totalSpent)}`, 40 + boxWidth + 20, startY + 22);
 
     // Box 3: Net Balance
     doc.rect(40 + (boxWidth + 10) * 2, startY, boxWidth, 42).fillAndStroke(netBalance >= 0 ? "#eff6ff" : "#fff7ed", netBalance >= 0 ? "#93c5fd" : "#fdba74");
     doc.font("Helvetica-Bold").fontSize(7.5).fillColor(netBalance >= 0 ? "#1d4ed8" : "#c2410c").text("NET SURPLUS / BALANCE", 40 + (boxWidth + 10) * 2 + 10, startY + 8);
-    doc.font("Helvetica-Bold").fontSize(11).fillColor(netBalance >= 0 ? "#1e40af" : "#9a3412").text(`₹ ${formatINR(netBalance)}`, 40 + (boxWidth + 10) * 2 + 10, startY + 22);
+    doc.font("Helvetica-Bold").fontSize(11).fillColor(netBalance >= 0 ? "#1e40af" : "#9a3412").text(`Rs. ${formatINR(netBalance)}`, 40 + (boxWidth + 10) * 2 + 10, startY + 22);
 
     doc.y = startY + 54;
 
@@ -389,7 +392,7 @@ router.get("/pdf/monthly", async (req, res) => {
       .text("Donor / Payer Name", 95, tableY + 5)
       .text("Fund / Seva Category", 240, tableY + 5)
       .text("Mode", 370, tableY + 5)
-      .text("Amount (₹)", 440, tableY + 5, { width: 70, align: "right" });
+      .text("Amount (Rs.)", 440, tableY + 5, { width: 70, align: "right" });
 
     tableY += 20;
     doc.font("Helvetica").fontSize(7).fillColor("#1e293b");
@@ -398,20 +401,38 @@ router.get("/pdf/monthly", async (req, res) => {
       doc.text("No collections recorded in this billing cycle.", 45, tableY + 4);
       tableY += 16;
     } else {
-      collections.slice(0, 18).forEach((item, idx) => {
-        if (tableY > doc.page.height - 140) {
+      collections.forEach((item, idx) => {
+        const cleanName = (item.name || "Anonymous").replace(/[\r\n]+/g, " ").trim();
+        const cleanFund = (item.fund_name || "General Donation").replace(/[\r\n]+/g, " ").trim();
+
+        doc.font("Helvetica").fontSize(7);
+        const nameH = doc.heightOfString(cleanName, { width: 140 });
+        const fundH = doc.heightOfString(cleanFund, { width: 125 });
+        const rowH = Math.max(15, Math.max(nameH, fundH) + 5);
+
+        if (tableY + rowH > doc.page.height - 140) {
           doc.addPage();
           renderPdfHeader(doc, meta, "Monthly Financial Statement & Audit Ledger", `Period: ${monthTitle}`);
           tableY = doc.y;
+          doc.rect(40, tableY, doc.page.width - 80, 18).fill("#f1f5f9");
+          doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#334155")
+            .text("Date", 45, tableY + 5)
+            .text("Donor / Payer Name", 95, tableY + 5)
+            .text("Fund / Seva Category", 240, tableY + 5)
+            .text("Mode", 370, tableY + 5)
+            .text("Amount (Rs.)", 440, tableY + 5, { width: 70, align: "right" });
+          tableY += 20;
+          doc.font("Helvetica").fontSize(7);
         }
-        if (idx % 2 === 1) doc.rect(40, tableY - 2, doc.page.width - 80, 14).fill("#fafafa");
+
+        if (idx % 2 === 1) doc.rect(40, tableY - 1, doc.page.width - 80, rowH).fill("#fafafa");
         doc.fillColor("#1e293b")
-          .text(new Date(item.date).toLocaleDateString("en-IN"), 45, tableY)
-          .text(item.name || "Anonymous", 95, tableY, { width: 140, lineBreak: false })
-          .text(item.fund_name || "General Donation", 240, tableY, { width: 125, lineBreak: false })
-          .text(item.payment_mode || "ONLINE", 370, tableY)
-          .text(formatINR(item.amount), 440, tableY, { width: 70, align: "right" });
-        tableY += 14;
+          .text(new Date(item.date).toLocaleDateString("en-IN"), 45, tableY + 2)
+          .text(cleanName, 95, tableY + 2, { width: 140 })
+          .text(cleanFund, 240, tableY + 2, { width: 125 })
+          .text(item.payment_mode || "ONLINE", 370, tableY + 2)
+          .text(formatINR(item.amount), 440, tableY + 2, { width: 70, align: "right" });
+        tableY += rowH;
       });
     }
 
@@ -429,10 +450,10 @@ router.get("/pdf/monthly", async (req, res) => {
     doc.rect(40, tableY, doc.page.width - 80, 18).fill("#f1f5f9");
     doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#334155")
       .text("Date", 45, tableY + 5)
-      .text("Category", 95, tableY + 5)
-      .text("Title / Payee", 220, tableY + 5)
-      .text("Description", 320, tableY + 5)
-      .text("Amount (₹)", 440, tableY + 5, { width: 70, align: "right" });
+      .text("Category", 100, tableY + 5)
+      .text("Title / Payee", 180, tableY + 5)
+      .text("Description", 305, tableY + 5)
+      .text("Amount (Rs.)", 450, tableY + 5, { width: 65, align: "right" });
 
     tableY += 20;
     doc.font("Helvetica").fontSize(7).fillColor("#1e293b");
@@ -441,24 +462,48 @@ router.get("/pdf/monthly", async (req, res) => {
       doc.text("No expenditures booked in this billing cycle.", 45, tableY + 4);
       tableY += 16;
     } else {
-      expenses.slice(0, 10).forEach((item, idx) => {
-        if (tableY > doc.page.height - 140) {
+      expenses.forEach((item, idx) => {
+        const cleanCat = (item.category || "General").replace(/[\r\n]+/g, " ").trim();
+        const cleanTitle = (item.title || "N/A").replace(/[\r\n]+/g, " ").trim();
+        const cleanDesc = (item.description || "N/A").replace(/[\r\n]+/g, " ").trim();
+
+        doc.font("Helvetica").fontSize(7);
+        const titleH = doc.heightOfString(cleanTitle, { width: 120 });
+        const descH = doc.heightOfString(cleanDesc, { width: 140 });
+        const rowH = Math.max(16, Math.max(titleH, descH) + 6);
+
+        if (tableY + rowH > doc.page.height - 140) {
           doc.addPage();
           renderPdfHeader(doc, meta, "Monthly Financial Statement & Audit Ledger", `Period: ${monthTitle}`);
           tableY = doc.y;
+          doc.rect(40, tableY, doc.page.width - 80, 18).fill("#f1f5f9");
+          doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#334155")
+            .text("Date", 45, tableY + 5)
+            .text("Category", 100, tableY + 5)
+            .text("Title / Payee", 180, tableY + 5)
+            .text("Description", 305, tableY + 5)
+            .text("Amount (Rs.)", 450, tableY + 5, { width: 65, align: "right" });
+          tableY += 20;
+          doc.font("Helvetica").fontSize(7);
         }
-        if (idx % 2 === 1) doc.rect(40, tableY - 2, doc.page.width - 80, 14).fill("#fafafa");
+
+        if (idx % 2 === 1) doc.rect(40, tableY - 1, doc.page.width - 80, rowH).fill("#fafafa");
         doc.fillColor("#1e293b")
-          .text(new Date(item.date).toLocaleDateString("en-IN"), 45, tableY)
-          .text(item.category || "General", 95, tableY, { width: 120, lineBreak: false })
-          .text(item.title || "N/A", 220, tableY, { width: 95, lineBreak: false })
-          .text(item.description || "N/A", 320, tableY, { width: 115, lineBreak: false })
-          .text(formatINR(item.amount), 440, tableY, { width: 70, align: "right" });
-        tableY += 14;
+          .text(new Date(item.date).toLocaleDateString("en-IN"), 45, tableY + 3)
+          .text(cleanCat, 100, tableY + 3, { width: 75 })
+          .text(cleanTitle, 180, tableY + 3, { width: 120 })
+          .text(cleanDesc, 305, tableY + 3, { width: 140 })
+          .text(formatINR(item.amount), 450, tableY + 3, { width: 65, align: "right" });
+        tableY += rowH;
       });
     }
 
-    doc.moveDown(1.5);
+    doc.y = tableY + 10;
+    if (doc.y > doc.page.height - 130) {
+      doc.addPage();
+      renderPdfHeader(doc, meta, "Monthly Financial Statement & Audit Ledger", `Period: ${monthTitle}`);
+    }
+
     doc.font("Helvetica-Oblique").fontSize(8).fillColor("#475569")
       .text(`Total Collections in Words: ${amountInWords(totalCollected)}`, 45, doc.y);
 
@@ -499,9 +544,9 @@ router.get("/pdf/fund-wise", async (req, res) => {
       .text("Sl", 45, tableY + 6)
       .text("Fund / Seva Name", 75, tableY + 6)
       .text("Category", 230, tableY + 6)
-      .text("Base Amount (₹)", 320, tableY + 6)
+      .text("Base Amount (Rs.)", 320, tableY + 6)
       .text("Donors", 400, tableY + 6)
-      .text("Total Raised (₹)", 440, tableY + 6, { width: 70, align: "right" });
+      .text("Total Raised (Rs.)", 440, tableY + 6, { width: 70, align: "right" });
 
     tableY += 22;
     doc.font("Helvetica").fontSize(8).fillColor("#1e293b");
@@ -522,7 +567,7 @@ router.get("/pdf/fund-wise", async (req, res) => {
     doc.rect(40, tableY - 3, doc.page.width - 80, 20).fill("#f8fafc");
     doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#0f172a")
       .text("CONSOLIDATED TOTAL", 75, tableY + 2)
-      .text(`₹ ${formatINR(totalAllFunds)}`, 440, tableY + 2, { width: 70, align: "right" });
+      .text(`Rs. ${formatINR(totalAllFunds)}`, 440, tableY + 2, { width: 70, align: "right" });
 
     doc.moveDown(2);
     doc.font("Helvetica-Oblique").fontSize(8.5).fillColor("#475569")
@@ -567,7 +612,7 @@ router.get("/pdf/member-wise", async (req, res) => {
       .text("Official Role", 210, tableY + 6)
       .text("Member ID", 310, tableY + 6)
       .text("Count", 390, tableY + 6)
-      .text("Total Paid (₹)", 440, tableY + 6, { width: 70, align: "right" });
+      .text("Total Paid (Rs.)", 440, tableY + 6, { width: 70, align: "right" });
 
     tableY += 22;
     doc.font("Helvetica").fontSize(7.5).fillColor("#1e293b");
@@ -593,7 +638,7 @@ router.get("/pdf/member-wise", async (req, res) => {
     doc.rect(40, tableY - 3, doc.page.width - 80, 20).fill("#f8fafc");
     doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#0f172a")
       .text("CONSOLIDATED MEMBER CONTRIBUTIONS", 70, tableY + 2)
-      .text(`₹ ${formatINR(totalMemberContrib)}`, 440, tableY + 2, { width: 70, align: "right" });
+      .text(`Rs. ${formatINR(totalMemberContrib)}`, 440, tableY + 2, { width: 70, align: "right" });
 
     renderPdfFooterAndSignatures(doc, meta);
     doc.end();

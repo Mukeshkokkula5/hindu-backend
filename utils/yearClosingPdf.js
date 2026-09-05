@@ -75,7 +75,7 @@ module.exports = async function generateYearClosingPDF(res, data) {
      SUMMARY
   ========================= */
   const formatMoney = value =>
-    `₹ ${Number(value || 0).toLocaleString("en-IN", {
+    `Rs. ${Number(value || 0).toLocaleString("en-IN", {
       minimumFractionDigits: 2,
     })}`;
 
