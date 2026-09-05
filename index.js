@@ -121,12 +121,14 @@ app.use(
 ========================= */
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/uploads/bills", express.static(path.join(__dirname, "uploads", "bills")));
+app.use("/uploads/covid-seva", express.static(path.join(__dirname, "uploads", "covid-seva")));
 if (process.env.VERCEL || process.env.NODE_ENV === "production") {
   app.use("/uploads", express.static("/tmp"));
   app.use("/uploads/bills", express.static("/tmp"));
   app.use("/uploads/blood", express.static("/tmp"));
   app.use("/uploads/signatures", express.static("/tmp"));
   app.use("/uploads/aapadbandhava", express.static("/tmp"));
+  app.use("/uploads/covid-seva", express.static("/tmp"));
 }
 
 

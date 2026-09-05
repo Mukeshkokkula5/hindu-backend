@@ -50,7 +50,7 @@ async function ensureTable() {
       story_english TEXT DEFAULT 'When the entire nation stood still in lockdown, our dedicated youth stepped onto the streets risking their lives to ensure no soul in Jagtial went to sleep hungry. For 50 unbroken days, fresh nutritious food was cooked, packed, and delivered to doorsteps, quarantine centres, hospitals, and highways.',
       youtube_url TEXT DEFAULT '',
       video_title VARCHAR(255) DEFAULT '50 Days Corona Annadanam Documentary - Hindu Swaraj Youth, Jagtial',
-      stat_days INT DEFAULT 50,
+      stat_days VARCHAR(50) DEFAULT '50+',
       stat_meals VARCHAR(50) DEFAULT '50,000+',
       stat_volunteers VARCHAR(50) DEFAULT '100+',
       stat_families VARCHAR(50) DEFAULT '5,000+',
@@ -188,7 +188,7 @@ router.post("/admin", verifyToken, checkRole("SUPER_ADMIN", "PRESIDENT", "GENERA
           story_english || '',
           youtube_url || '',
           video_title || '50 Days Corona Annadanam Documentary',
-          stat_days || 50,
+          stat_days || '50+',
           stat_meals || '50,000+',
           stat_volunteers || '100+',
           stat_families || '5,000+',
@@ -218,7 +218,17 @@ router.post(
       if (!req.file) {
         return res.status(400).json({ success: false, error: "No file uploaded" });
       }
-      const publicUrl = `/uploads/covid-seva/${req.file.filename}`;
+      let publicUrl = `/uploads/covid-seva/${req.file.filename}`;
+      // On Vercel / serverless ephemeral disk, convert file to Base64 data URL so it never gets lost!
+      if (req.file.path && fs.existsSync(req.file.path)) {
+        try {
+          const fileData = fs.readFileSync(req.file.path);
+          const mime = req.file.mimetype || "image/jpeg";
+          publicUrl = `data:${mime};base64,${fileData.toString("base64")}`;
+        } catch (e) {
+          console.warn("Base64 conversion note:", e.message);
+        }
+      }
       res.json({ success: true, url: publicUrl, filename: req.file.filename });
     } catch (err) {
       console.error("UPLOAD ERROR:", err.message);
