@@ -543,6 +543,7 @@ app.use("/chatbot", require("./routes/chatbot"));
 app.use("/aapadbandhava", require("./routes/aapadbandhava"));
 app.use("/community", require("./routes/community"));
 app.use("/whatsapp", require("./routes/whatsapp"));
+app.use("/covid-seva", require("./routes/covidSeva"));
 
 // WhatsApp auto-init disabled per user directive
 // if (!process.env.VERCEL) {
