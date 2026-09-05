@@ -227,14 +227,36 @@ router.get("/member-wise-data", verifyToken, async (req, res) => {
 async function getAssociationMeta() {
   try {
     const res = await pool.query("SELECT * FROM association_settings ORDER BY id DESC LIMIT 1");
-    if (res.rows.length) return res.rows[0];
+    if (res.rows.length) {
+      const s = res.rows[0];
+      return {
+        association_name: s.association_name || "HINDU SWARAJ YOUTH WELFARE ASSOCIATION",
+        reg_number: "784/2025",
+        regd_no: s.regd_no || "Regd. No: 784/2025 (Govt. of Telangana)",
+        address: "H.No. 4-1-140, Vani Nagar, Jagtial, Telangana - 505327",
+        email: "hinduswarajyouth@gmail.com",
+        phone: "+91 84998 78425",
+        president_name: s.president_name || "Vinodh Kumar Kokkula",
+        treasurer_name: s.treasurer_name || "Sambari Sai",
+        gs_name: s.gs_name || "Thota Srikanth",
+        president_signature_url: s.president_signature_url,
+        treasurer_signature_url: s.treasurer_signature_url,
+        association_seal_url: s.association_seal_url,
+      };
+    }
   } catch (e) {
     console.warn("Could not load association_settings for PDF:", e.message);
   }
   return {
     association_name: "HINDU SWARAJ YOUTH WELFARE ASSOCIATION",
-    reg_number: "486/2024",
-    address: "Registered Office: Jagtial, Telangana - 505327",
+    reg_number: "784/2025",
+    regd_no: "Regd. No: 784/2025 (Govt. of Telangana)",
+    address: "H.No. 4-1-140, Vani Nagar, Jagtial, Telangana - 505327",
+    email: "hinduswarajyouth@gmail.com",
+    phone: "+91 84998 78425",
+    president_name: "Vinodh Kumar Kokkula",
+    treasurer_name: "Sambari Sai",
+    gs_name: "Thota Srikanth",
     president_signature_url: null,
     treasurer_signature_url: null,
     association_seal_url: null,
@@ -252,9 +274,11 @@ function renderPdfHeader(doc, meta, title, subtitle = "") {
 
   // Top header text
   doc.font("Helvetica-Bold").fontSize(14).fillColor("#580505").text("HINDU SWARAJ YOUTH WELFARE ASSOCIATION", { align: "center" });
-  doc.font("Helvetica").fontSize(8.5).fillColor("#475569")
-    .text(`(Regd. Under Telangana Societies Registration Act 2001 • Regd No: ${meta.reg_number || "486/2024"})`, { align: "center" })
-    .text(meta.address || "Jagtial, Telangana - 505327 • Email: support@hinduswarajyouth.online", { align: "center" });
+  doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#991b1b")
+    .text(`(Regd. Under Telangana Societies Registration Act 2001 • Regd No: ${meta.reg_number || "784/2025"})`, { align: "center" });
+  doc.font("Helvetica").fontSize(7.8).fillColor("#475569")
+    .text(meta.address || "H.No. 4-1-140, Vani Nagar, Jagtial, Telangana - 505327", { align: "center" })
+    .text(`Email: ${meta.email || "hinduswarajyouth@gmail.com"} • Helpline: ${meta.phone || "+91 84998 78425"} • Web: www.hinduswarajyouth.online`, { align: "center" });
 
   doc.moveDown(0.8);
   doc.strokeColor("#580505").lineWidth(1.5)
@@ -291,15 +315,18 @@ function renderPdfFooterAndSignatures(doc, meta) {
     .stroke();
 
   // President Sign block
-  doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#0f172a").text("PRESIDENT", 60, bottomY + 30, { align: "left", lineBreak: false });
-  doc.font("Helvetica").fontSize(7.5).fillColor("#64748b").text("Hindu Swaraj Youth", 60, bottomY + 42, { align: "left", lineBreak: false });
+  doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#0f172a").text("PRESIDENT", 60, bottomY + 25, { align: "left", lineBreak: false });
+  doc.font("Helvetica-Bold").fontSize(8).fillColor("#1e293b").text(meta.president_name || "Vinodh Kumar Kokkula", 60, bottomY + 37, { align: "left", lineBreak: false });
+  doc.font("Helvetica").fontSize(7).fillColor("#64748b").text("Hindu Swaraj Youth", 60, bottomY + 48, { align: "left", lineBreak: false });
 
   // Official Seal in center
-  doc.font("Helvetica-Bold").fontSize(8).fillColor("#580505").text("[ ASSOCIATION SEAL ]", doc.page.width / 2 - 50, bottomY + 30, { width: 100, align: "center", lineBreak: false });
+  doc.font("Helvetica-Bold").fontSize(8).fillColor("#580505").text("[ ASSOCIATION SEAL ]", doc.page.width / 2 - 60, bottomY + 25, { width: 120, align: "center", lineBreak: false });
+  doc.font("Helvetica").fontSize(7).fillColor("#64748b").text(`Regd. No: ${meta.reg_number || "784/2025"} • Jagtial`, doc.page.width / 2 - 60, bottomY + 38, { width: 120, align: "center", lineBreak: false });
 
   // Treasurer Sign block
-  doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#0f172a").text("TREASURER", doc.page.width - 150, bottomY + 30, { align: "right", width: 90, lineBreak: false });
-  doc.font("Helvetica").fontSize(7.5).fillColor("#64748b").text("Hindu Swaraj Youth", doc.page.width - 150, bottomY + 42, { align: "right", width: 90, lineBreak: false });
+  doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#0f172a").text("TREASURER", doc.page.width - 160, bottomY + 25, { align: "right", width: 100, lineBreak: false });
+  doc.font("Helvetica-Bold").fontSize(8).fillColor("#1e293b").text(meta.treasurer_name || "Sambari Sai", doc.page.width - 160, bottomY + 37, { align: "right", width: 100, lineBreak: false });
+  doc.font("Helvetica").fontSize(7).fillColor("#64748b").text("Hindu Swaraj Youth", doc.page.width - 160, bottomY + 48, { align: "right", width: 100, lineBreak: false });
 
   // Page Numbers
   const range = doc.bufferedPageRange();
