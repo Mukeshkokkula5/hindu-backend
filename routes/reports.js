@@ -267,7 +267,17 @@ function renderPdfHeader(doc, meta, title, subtitle = "") {
   if (subtitle) {
     doc.font("Helvetica-Bold").fontSize(9.5).fillColor("#4338ca").text(subtitle, { align: "center" });
   }
-  doc.font("Helvetica").fontSize(7.5).fillColor("#64748b").text(`Generated On: ${new Date().toLocaleString("en-IN")}`, { align: "center" });
+  const istTime = new Date().toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "numeric",
+    month: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+    hour12: true,
+  });
+  doc.font("Helvetica").fontSize(7.5).fillColor("#64748b").text(`Generated On: ${istTime}`, { align: "center" });
   doc.moveDown(1.2);
 }
 
@@ -380,9 +390,10 @@ router.get("/pdf/monthly", async (req, res) => {
     doc.font("Helvetica-Bold").fontSize(11).fillColor(netBalance >= 0 ? "#1e40af" : "#9a3412").text(`Rs. ${formatINR(netBalance)}`, 40 + (boxWidth + 10) * 2 + 10, startY + 22);
 
     doc.y = startY + 54;
+    doc.x = 40;
 
     // Collections Table
-    doc.font("Helvetica-Bold").fontSize(9.5).fillColor("#580505").text(`1. Itemized Inflow & Donations Ledger (${collections.length} Records)`);
+    doc.font("Helvetica-Bold").fontSize(9.5).fillColor("#580505").text(`1. Itemized Inflow & Donations Ledger (${collections.length} Records)`, 40, doc.y);
     doc.moveDown(0.4);
 
     let tableY = doc.y;
@@ -437,13 +448,15 @@ router.get("/pdf/monthly", async (req, res) => {
     }
 
     // Expenditures Table
-    doc.y = tableY + 12;
+    doc.y = tableY + 14;
+    doc.x = 40;
     if (doc.y > doc.page.height - 160) {
       doc.addPage();
       renderPdfHeader(doc, meta, "Monthly Financial Statement & Audit Ledger", `Period: ${monthTitle}`);
+      doc.x = 40;
     }
 
-    doc.font("Helvetica-Bold").fontSize(9.5).fillColor("#580505").text(`2. Outflows & Expenditures Incurred (${expenses.length} Records)`);
+    doc.font("Helvetica-Bold").fontSize(9.5).fillColor("#580505").text(`2. Outflows & Expenditures Incurred (${expenses.length} Records)`, 40, doc.y);
     doc.moveDown(0.4);
 
     tableY = doc.y;
@@ -498,14 +511,16 @@ router.get("/pdf/monthly", async (req, res) => {
       });
     }
 
-    doc.y = tableY + 10;
+    doc.y = tableY + 12;
+    doc.x = 40;
     if (doc.y > doc.page.height - 130) {
       doc.addPage();
       renderPdfHeader(doc, meta, "Monthly Financial Statement & Audit Ledger", `Period: ${monthTitle}`);
+      doc.x = 40;
     }
 
     doc.font("Helvetica-Oblique").fontSize(8).fillColor("#475569")
-      .text(`Total Collections in Words: ${amountInWords(totalCollected)}`, 45, doc.y);
+      .text(`Total Collections in Words: ${amountInWords(totalCollected)}`, 40, doc.y);
 
     renderPdfFooterAndSignatures(doc, meta);
     doc.end();
