@@ -265,29 +265,39 @@ async function getAssociationMeta() {
 
 function renderPdfHeader(doc, meta, title, subtitle = "") {
   // Association Emblem / Logo
-  if (fs.existsSync(LOGO_PATH)) {
+  const hasLogo = fs.existsSync(LOGO_PATH);
+  if (hasLogo) {
     try {
-      doc.image(LOGO_PATH, doc.page.width / 2 - 30, 25, { width: 60 });
-    } catch (e) {}
+      const logoWidth = 54;
+      const logoX = (doc.page.width - logoWidth) / 2;
+      const logoY = 20;
+      doc.image(LOGO_PATH, logoX, logoY, { width: logoWidth, height: logoWidth });
+      // Set explicit Y below the logo so text never overlaps regardless of previous page font state
+      doc.y = logoY + logoWidth + 8;
+    } catch (e) {
+      doc.y = 35;
+    }
+  } else {
+    doc.y = 35;
   }
-  doc.moveDown(fs.existsSync(LOGO_PATH) ? 3.5 : 1);
+  doc.x = 40;
 
   // Top header text
-  doc.font("Helvetica-Bold").fontSize(14).fillColor("#580505").text("HINDU SWARAJ YOUTH WELFARE ASSOCIATION", { align: "center" });
+  doc.font("Helvetica-Bold").fontSize(13.5).fillColor("#580505").text("HINDU SWARAJ YOUTH WELFARE ASSOCIATION", { align: "center" });
   doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#991b1b")
     .text(`(Regd. Under Telangana Societies Registration Act 2001 • Regd No: ${meta.reg_number || "784/2025"})`, { align: "center" });
   doc.font("Helvetica").fontSize(7.8).fillColor("#475569")
     .text(meta.address || "H.No. 4-1-140, Vani Nagar, Jagtial, Telangana - 505327", { align: "center" })
     .text(`Email: ${meta.email || "hinduswarajyouth@gmail.com"} • Helpline: ${meta.phone || "+91 84998 78425"} • Web: www.hinduswarajyouth.online`, { align: "center" });
 
-  doc.moveDown(0.8);
+  doc.moveDown(0.7);
   doc.strokeColor("#580505").lineWidth(1.5)
     .moveTo(40, doc.y)
     .lineTo(doc.page.width - 40, doc.y)
     .stroke();
 
-  doc.moveDown(1);
-  doc.font("Helvetica-Bold").fontSize(13).fillColor("#0f172a").text(title.toUpperCase(), { align: "center" });
+  doc.moveDown(0.8);
+  doc.font("Helvetica-Bold").fontSize(12.5).fillColor("#0f172a").text(title.toUpperCase(), { align: "center" });
   if (subtitle) {
     doc.font("Helvetica-Bold").fontSize(9.5).fillColor("#4338ca").text(subtitle, { align: "center" });
   }
@@ -302,7 +312,7 @@ function renderPdfHeader(doc, meta, title, subtitle = "") {
     hour12: true,
   });
   doc.font("Helvetica").fontSize(7.5).fillColor("#64748b").text(`Generated On: ${istTime}`, { align: "center" });
-  doc.moveDown(1.2);
+  doc.moveDown(1.0);
 }
 
 function renderPdfFooterAndSignatures(doc, meta) {
@@ -594,6 +604,21 @@ router.get("/pdf/fund-wise", async (req, res) => {
     doc.font("Helvetica").fontSize(8).fillColor("#1e293b");
 
     rows.forEach((fund, idx) => {
+      if (tableY > doc.page.height - 140) {
+        doc.addPage();
+        renderPdfHeader(doc, meta, "Fund-wise Collection & Seva Allocation Report");
+        tableY = doc.y;
+        doc.rect(40, tableY, doc.page.width - 80, 20).fill("#f1f5f9");
+        doc.font("Helvetica-Bold").fontSize(8).fillColor("#334155")
+          .text("Sl", 45, tableY + 6)
+          .text("Fund / Seva Name", 75, tableY + 6)
+          .text("Category", 230, tableY + 6)
+          .text("Base Amount (Rs.)", 320, tableY + 6)
+          .text("Donors", 400, tableY + 6)
+          .text("Total Raised (Rs.)", 440, tableY + 6, { width: 70, align: "right" });
+        tableY += 22;
+        doc.font("Helvetica").fontSize(8);
+      }
       if (idx % 2 === 1) doc.rect(40, tableY - 3, doc.page.width - 80, 18).fill("#fafafa");
       doc.fillColor("#1e293b")
         .text(idx + 1, 45, tableY)
@@ -664,6 +689,16 @@ router.get("/pdf/member-wise", async (req, res) => {
         doc.addPage();
         renderPdfHeader(doc, meta, "Member-wise Contribution Ledger");
         tableY = doc.y;
+        doc.rect(40, tableY, doc.page.width - 80, 20).fill("#f1f5f9");
+        doc.font("Helvetica-Bold").fontSize(8).fillColor("#334155")
+          .text("Sl", 45, tableY + 6)
+          .text("Member Name", 70, tableY + 6)
+          .text("Official Role", 210, tableY + 6)
+          .text("Member ID", 310, tableY + 6)
+          .text("Count", 390, tableY + 6)
+          .text("Total Paid (Rs.)", 440, tableY + 6, { width: 70, align: "right" });
+        tableY += 22;
+        doc.font("Helvetica").fontSize(7.5);
       }
       if (idx % 2 === 1) doc.rect(40, tableY - 3, doc.page.width - 80, 16).fill("#fafafa");
       doc.fillColor("#1e293b")
