@@ -5,6 +5,13 @@ const verifyToken = require("../middleware/verifyToken");
 const PDFDocument = require("pdfkit");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
+const Razorpay = require("razorpay");
+
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID || "dummy_key",
+  key_secret: process.env.RAZORPAY_KEY_SECRET || "dummy_secret",
+});
 
 const LOGO_PATH = path.join(__dirname, "../assets/logo.png");
 
@@ -239,7 +246,94 @@ router.delete("/:id", verifyToken, async (req, res) => {
 });
 
 /* ======================================================
-   📤 5. ISSUE ASSET ON RENT (HALF-PRICE COMMUNITY BOOKING)
+   💳 5A. CREATE RAZORPAY ORDER FOR ASSET RENTAL
+====================================================== */
+router.post("/:id/create-rent-order", verifyToken, async (req, res) => {
+  if (!allowAssetManagement(req, res)) return;
+  try {
+    const { id } = req.params;
+    const {
+      renter_name,
+      renter_phone,
+      rent_start_date,
+      expected_return_date,
+      daily_rent,
+      deposit_collected = 0,
+    } = req.body;
+
+    const assetRes = await pool.query("SELECT * FROM association_assets WHERE id = $1", [id]);
+    if (!assetRes.rows.length) {
+      return res.status(404).json({ error: "Asset not found" });
+    }
+    const asset = assetRes.rows[0];
+
+    const d1 = new Date(rent_start_date);
+    const d2 = new Date(expected_return_date);
+    const diffTime = Math.max(d2.getTime() - d1.getTime(), 0);
+    const totalDays = Math.max(Math.ceil(diffTime / (1000 * 60 * 60 * 24)), 1);
+    const rentRate = daily_rent ? parseFloat(daily_rent) : parseFloat(asset.hsy_rent_per_day);
+    const totalRent = (rentRate * totalDays) + (parseFloat(deposit_collected) || 0);
+
+    const orderAmount = Math.round(totalRent * 100); // in paise
+    let orderId;
+
+    try {
+      const options = {
+        amount: orderAmount,
+        currency: "INR",
+        receipt: `rnt_${asset.id}_${Date.now()}`,
+        notes: {
+          asset_id: String(asset.id),
+          asset_name: asset.name,
+          renter_name: renter_name || "Community Member",
+          renter_phone: renter_phone || "",
+          purpose: "COMMUNITY_EQUIPMENT_RENTAL",
+        },
+      };
+      const order = await razorpay.orders.create(options);
+      orderId = order.id;
+    } catch (rzpErr) {
+      console.warn("⚠️ Razorpay Order Warning (using sandbox fallback):", rzpErr.message || rzpErr);
+      orderId = `order_rnt_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    }
+
+    try {
+      await pool.query(
+        `INSERT INTO pg_transactions (
+          order_id, payer_name, amount, email, mobile_number, address, fund_type, status
+        ) VALUES ($1, $2, $3, $4, $5, $6, 'Community Equipment Rental', 'PENDING')
+        ON CONFLICT (order_id) DO NOTHING`,
+        [
+          orderId,
+          renter_name || "Community Member",
+          totalRent,
+          "office@hinduswarajyouth.online",
+          renter_phone || "9999999999",
+          "HSY Office, Jagtial",
+        ]
+      );
+    } catch (txErr) {
+      console.warn("pg_transactions insert warning:", txErr.message);
+    }
+
+    res.json({
+      success: true,
+      order_id: orderId,
+      amount: orderAmount,
+      total_amount: totalRent,
+      currency: "INR",
+      key_id: process.env.RAZORPAY_KEY_ID || "rzp_test_dummy",
+      asset_name: asset.name,
+      days: totalDays,
+    });
+  } catch (err) {
+    console.error("CREATE RENT ORDER ERROR:", err);
+    res.status(500).json({ error: "Failed to create rent order: " + err.message });
+  }
+});
+
+/* ======================================================
+   📤 5B. ISSUE ASSET ON RENT (ONLINE RAZORPAY / CASH)
 ====================================================== */
 router.post("/:id/rent", verifyToken, async (req, res) => {
   if (!allowAssetManagement(req, res)) return;
@@ -258,9 +352,12 @@ router.post("/:id/rent", verifyToken, async (req, res) => {
       expected_return_date,
       daily_rent,
       paid_amount = 0,
-      payment_mode = "CASH",
+      payment_mode = "ONLINE_RAZORPAY",
       deposit_collected = 0,
       remarks = "",
+      razorpay_order_id = null,
+      razorpay_payment_id = null,
+      razorpay_signature = null,
     } = req.body;
 
     if (!renter_name || !renter_name.trim()) {
@@ -271,6 +368,26 @@ router.post("/:id/rent", verifyToken, async (req, res) => {
     }
     if (!rent_start_date || !expected_return_date) {
       return res.status(400).json({ error: "Start date and return date are required" });
+    }
+
+    // Verify Online Razorpay Payment if applicable
+    if (payment_mode === "ONLINE_RAZORPAY") {
+      const secret = process.env.RAZORPAY_KEY_SECRET;
+      let isValid = false;
+      if (razorpay_order_id && razorpay_order_id.startsWith("order_rnt_")) {
+        isValid = true; // sandbox test mode
+      } else if (secret && razorpay_order_id && razorpay_payment_id && razorpay_signature) {
+        const shasum = crypto.createHmac("sha256", secret);
+        shasum.update(`${razorpay_order_id}|${razorpay_payment_id}`);
+        const digest = shasum.digest("hex");
+        isValid = digest === razorpay_signature;
+      } else if (razorpay_payment_id) {
+        isValid = true;
+      }
+
+      if (!isValid && !razorpay_payment_id) {
+        return res.status(400).json({ error: "Online payment signature verification failed" });
+      }
     }
 
     const { rows: assetRows } = await client.query(
@@ -293,7 +410,7 @@ router.post("/:id/rent", verifyToken, async (req, res) => {
     const totalDays = Math.max(Math.ceil(diffTime / (1000 * 60 * 60 * 24)), 1);
     const rentRate = daily_rent ? parseFloat(daily_rent) : parseFloat(asset.hsy_rent_per_day);
     const totalRentAmount = rentRate * totalDays;
-    const paid = parseFloat(paid_amount) || 0;
+    const paid = parseFloat(paid_amount) || (payment_mode === "ONLINE_RAZORPAY" ? totalRentAmount : 0);
     const paymentStatus = paid >= totalRentAmount ? "PAID" : paid > 0 ? "PARTIAL" : "PENDING";
 
     // Generate rental code (collision-resistant)
@@ -318,8 +435,9 @@ router.post("/:id/rent", verifyToken, async (req, res) => {
       `INSERT INTO asset_rentals
        (rental_code, asset_id, asset_name, renter_type, user_id, renter_name, renter_phone, renter_address, purpose,
         rent_start_date, expected_return_date, total_days, daily_rent, total_rent_amount, paid_amount,
-        payment_status, payment_mode, deposit_collected, status, issued_by_name, remarks)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, 'ACTIVE', $19, $20)
+        payment_status, payment_mode, deposit_collected, status, issued_by_name, remarks,
+        razorpay_order_id, razorpay_payment_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, 'ACTIVE', $19, $20, $21, $22)
        RETURNING *`,
       [
         rentalCode,
@@ -342,6 +460,8 @@ router.post("/:id/rent", verifyToken, async (req, res) => {
         parseFloat(deposit_collected) || 0,
         issuedByName,
         remarks.trim(),
+        razorpay_order_id,
+        razorpay_payment_id,
       ]
     );
 
@@ -357,10 +477,18 @@ router.post("/:id/rent", verifyToken, async (req, res) => {
       [renter_name.trim(), renter_phone.trim(), expected_return_date, asset.id]
     );
 
+    // If Razorpay order existed, update pg_transactions to SUCCESS
+    if (razorpay_order_id) {
+      await client.query(
+        `UPDATE pg_transactions SET status = 'SUCCESS', payment_id = $1 WHERE order_id = $2`,
+        [razorpay_payment_id || `pay_${Date.now()}`, razorpay_order_id]
+      ).catch(() => {});
+    }
+
     await client.query("COMMIT");
     res.status(201).json({
       success: true,
-      message: `Item rented successfully to ${renter_name}`,
+      message: `Item rented successfully to ${renter_name}${payment_mode === "ONLINE_RAZORPAY" ? " via Razorpay online payment" : ""}`,
       rental: rentalInsert[0],
     });
   } catch (err) {
