@@ -118,6 +118,8 @@ router.post("/login", loginLimiter, async (req, res) => {
           OR LOWER(username) = LOWER($1 || '@hsy.org')
           OR LOWER(username) = LOWER(REPLACE($1, '@hsy.org', ''))
           OR LOWER(COALESCE(personal_email, '')) = LOWER($1)
+          OR LOWER(COALESCE(member_id, '')) = LOWER($1)
+          OR COALESCE(phone, '') = $1
        LIMIT 1`,
       [loginId.trim()]
     );
@@ -288,7 +290,12 @@ router.post("/forgot-password", authLimiter, async (req, res) => {
     const userResult = await pool.query(
       `SELECT id, name, username, personal_email 
        FROM users 
-       WHERE username=$1 OR username=$1 || '@hsy.org' OR personal_email=$1`,
+       WHERE LOWER(username) = LOWER($1)
+          OR LOWER(username) = LOWER($1 || '@hsy.org')
+          OR LOWER(username) = LOWER(REPLACE($1, '@hsy.org', ''))
+          OR LOWER(COALESCE(personal_email, '')) = LOWER($1)
+          OR LOWER(COALESCE(member_id, '')) = LOWER($1)
+          OR COALESCE(phone, '') = $1`,
       [identifier]
     );
 
