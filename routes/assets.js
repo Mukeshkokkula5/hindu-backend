@@ -21,9 +21,18 @@ function allowAssetManagement(req, res) {
     res.status(401).json({ error: "Unauthorized" });
     return false;
   }
-  const allowed = ["SUPER_ADMIN", "ADMIN", "PRESIDENT", "TREASURER", "GENERAL_SECRETARY", "EC_MEMBER"];
+  const allowed = [
+    "SUPER_ADMIN",
+    "ADMIN",
+    "PRESIDENT",
+    "VICE_PRESIDENT",
+    "GENERAL_SECRETARY",
+    "JOINT_SECRETARY",
+    "TREASURER",
+    "EC_MEMBER",
+  ];
   const role = normalizeRole(req.user.role);
-  if (!allowed.includes(role) && role !== "SUPER_ADMIN" && role !== "PRESIDENT") {
+  if (!allowed.includes(role)) {
     res.status(403).json({ error: "Access denied: insufficient permissions to manage assets" });
     return false;
   }
@@ -105,9 +114,17 @@ router.post("/", verifyToken, async (req, res) => {
       return res.status(400).json({ error: "Asset name is required" });
     }
 
-    // Generate next tag: HSY-AST-XXXX
-    const countRes = await pool.query("SELECT COUNT(*) FROM association_assets");
-    const nextNum = parseInt(countRes.rows[0].count, 10) + 1;
+    // Generate next tag: HSY-AST-XXXX (collision-resistant)
+    const maxRes = await pool.query(`
+      SELECT COALESCE(MAX(
+        CASE 
+          WHEN asset_tag ~ '^HSY-AST-[0-9]+$' THEN CAST(SUBSTRING(asset_tag FROM 9) AS INTEGER)
+          ELSE id
+        END
+      ), 0) + 1 AS next_num
+      FROM association_assets
+    `);
+    const nextNum = parseInt(maxRes.rows[0].next_num, 10) || 1;
     const assetTag = `HSY-AST-${String(nextNum).padStart(4, "0")}`;
 
     const { rows } = await pool.query(
@@ -279,10 +296,19 @@ router.post("/:id/rent", verifyToken, async (req, res) => {
     const paid = parseFloat(paid_amount) || 0;
     const paymentStatus = paid >= totalRentAmount ? "PAID" : paid > 0 ? "PARTIAL" : "PENDING";
 
-    // Generate rental code
+    // Generate rental code (collision-resistant)
     const year = new Date().getFullYear();
-    const countRes = await client.query("SELECT COUNT(*) FROM asset_rentals");
-    const rentalNum = parseInt(countRes.rows[0].count, 10) + 1;
+    const maxRentalRes = await client.query(
+      `SELECT COALESCE(MAX(
+        CASE 
+          WHEN rental_code ~ ('^HSY-RNT-' || $1 || '-[0-9]+$') THEN CAST(SUBSTRING(rental_code FROM 14) AS INTEGER)
+          ELSE id
+        END
+      ), 0) + 1 AS next_num
+      FROM asset_rentals`,
+      [year]
+    );
+    const rentalNum = parseInt(maxRentalRes.rows[0].next_num, 10) || 1;
     const rentalCode = `HSY-RNT-${year}-${String(rentalNum).padStart(4, "0")}`;
 
     const issuedByName = req.user?.name || req.user?.username || "Office Admin";
