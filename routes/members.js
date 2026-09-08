@@ -6,6 +6,7 @@ const bcrypt = require("bcryptjs");
 const sendMail = require("../utils/sendMail");
 const logAudit = require("../utils/auditLogger");
 const { addMemberTemplate, resendLoginTemplate, officialLoginDetailsTemplate } = require("../utils/emailTemplates");
+const generateMemberCode = require("../utils/generateMemberCode");
 
 const router = express.Router();
 
@@ -101,6 +102,10 @@ router.post(
       }
       const hashedPassword = await bcrypt.hash(rawPassword, 10);
 
+      const finalMemberId = (member_id && typeof member_id === "string" && member_id.trim())
+        ? member_id.trim()
+        : await generateMemberCode(pool);
+
       const result = await pool.query(
         `
         INSERT INTO users
@@ -109,7 +114,7 @@ router.post(
         RETURNING member_id, username
         `,
         [
-          member_id,
+          finalMemberId,
           name,
           association_id,
           personal_email,
