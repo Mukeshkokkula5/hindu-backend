@@ -827,7 +827,7 @@ router.get("/pdf/member-login-activity", async (req, res) => {
         : "N/A";
       const logoutStr = m.last_logout_at
         ? new Date(m.last_logout_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
-        : "Active / None";
+        : "—";
 
       doc.fillColor("#0f172a")
         .text(String(idx + 1), 45, curY)
@@ -940,8 +940,9 @@ router.get("/pdf/member-login-activity", async (req, res) => {
           : "N/A";
         const logOutTime = s.logout_at
           ? new Date(s.logout_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
-          : "Active Now";
-        const duration = s.duration_minutes ? `${s.duration_minutes}m` : (s.logout_at ? "<1m" : "Live");
+          : (s.status === "ACTIVE" ? "Active Now" : "— (Expired)");
+        const duration = s.duration_minutes ? `${s.duration_minutes}m` : (s.logout_at ? "<1m" : (s.status === "ACTIVE" ? "Live" : "—"));
+        const statusDisplay = s.status === "ACTIVE" ? "ACTIVE" : (s.logout_at ? "LOGGED_OUT" : "EXPIRED");
 
         doc.fillColor("#0f172a")
           .text(String(idx + 1), 45, curY)
@@ -950,7 +951,7 @@ router.get("/pdf/member-login-activity", async (req, res) => {
           .text(logInTime, 265, curY)
           .text(logOutTime, 370, curY)
           .text(duration, 475, curY)
-          .text(s.status || "LOGGED_OUT", 520, curY);
+          .text(statusDisplay, 520, curY);
         curY += 15;
       });
     }
