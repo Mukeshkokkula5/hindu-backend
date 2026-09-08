@@ -5,7 +5,7 @@ const checkRole = require("../middleware/checkRole");
 const bcrypt = require("bcryptjs");
 const sendMail = require("../utils/sendMail");
 const logAudit = require("../utils/auditLogger");
-const { addMemberTemplate, resendLoginTemplate } = require("../utils/emailTemplates");
+const { addMemberTemplate, resendLoginTemplate, officialLoginDetailsTemplate } = require("../utils/emailTemplates");
 
 const router = express.Router();
 
@@ -309,13 +309,15 @@ router.post(
   checkRole("SUPER_ADMIN", "PRESIDENT"),
   async (req, res) => {
     try {
+      const { id } = req.params;
+      const isNumeric = /^\d+$/.test(String(id).trim());
       const result = await pool.query(
         `
-        SELECT name, username AS association_id, personal_email
+        SELECT id, name, username, member_id, personal_email, role, phone
         FROM users
-        WHERE id=$1
+        WHERE ${isNumeric ? "id = $1" : "member_id = $1 OR username = $1"}
         `,
-        [req.params.id]
+        [id]
       );
 
       if (result.rows.length === 0) {
@@ -327,24 +329,42 @@ router.post(
       if (!u.personal_email) {
         return res
           .status(400)
-          .json({ error: "Member email not available" });
+          .json({ error: `Member ${u.name} has no registered personal email. Please edit member profile to add an email address.` });
       }
 
-      await sendMail(
+      const mailSent = await sendMail(
         u.personal_email,
-        "Association Login Details",
-        `
-        <h3>Hello ${u.name}</h3>
-        <p>Your login ID:</p>
-        <b>${u.association_id}</b>
-        <p>Please use your existing password.</p>
-        `
+        "Official Portal Login Details – Hinduswaraj Youth Welfare Association 🔐",
+        officialLoginDetailsTemplate({
+          name: u.name,
+          username: u.username,
+          memberId: u.member_id,
+          role: u.role,
+        })
       );
 
-      res.json({ message: "Login details sent" });
+      try {
+        await logAudit("RESEND_LOGIN_DETAILS", "USER", req.params.id, req.user.id);
+      } catch (auditErr) {
+        console.warn("Audit log warning:", auditErr.message);
+      }
+
+      res.json({
+        success: true,
+        message: mailSent
+          ? `Official login details sent successfully to ${u.personal_email}`
+          : "Login details generated, but email delivery failed. Please verify the email address.",
+        member: {
+          name: u.name,
+          username: u.username,
+          member_id: u.member_id,
+          role: u.role,
+          email: u.personal_email,
+        },
+      });
     } catch (err) {
       console.error("RESEND LOGIN ERROR 👉", err.message);
-      res.status(500).json({ error: "Failed to send login details" });
+      res.status(500).json({ error: "Failed to send login details: " + err.message });
     }
   }
 );
@@ -456,8 +476,9 @@ router.post(
         return res.status(400).json({ error: "Password must be at least 6 characters long" });
       }
 
+      const isNumeric = /^\d+$/.test(String(id).trim());
       const userRes = await pool.query(
-        "SELECT id, name, username, personal_email, role FROM users WHERE id=$1",
+        `SELECT id, name, username, personal_email, role FROM users WHERE ${isNumeric ? "id = $1" : "member_id = $1 OR username = $1"}`,
         [id]
       );
 

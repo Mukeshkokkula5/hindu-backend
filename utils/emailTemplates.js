@@ -221,6 +221,46 @@ ${footer}
 `;
 
 /* ===============================
+   🔐 OFFICIAL LOGIN DETAILS TEMPLATE
+================================ */
+exports.officialLoginDetailsTemplate = ({ name, username, memberId, role }) => `
+${header}
+
+<h3 style="color:#0d47a1;margin-bottom:8px;">Official Portal Login Details 🔐</h3>
+
+<p>Dear <b>${name}</b>,</p>
+
+<p>
+Here are your official login credentials for the <b>Hinduswaraj Youth Welfare Association</b> management portal:
+</p>
+
+<table style="width:100%;border-collapse:collapse;margin:16px 0;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">
+  <tr style="border-bottom:1px solid #e2e8f0;">
+    <td style="padding:10px 14px;color:#64748b;font-weight:600;width:35%;">Portal URL</td>
+    <td style="padding:10px 14px;font-weight:700;"><a href="https://www.hinduswarajyouth.online/admin" style="color:#2563eb;text-decoration:none;">https://www.hinduswarajyouth.online/admin</a></td>
+  </tr>
+  <tr style="border-bottom:1px solid #e2e8f0;">
+    <td style="padding:10px 14px;color:#64748b;font-weight:600;">Username / Login ID</td>
+    <td style="padding:10px 14px;font-weight:700;color:#091929;">${username}</td>
+  </tr>
+  <tr style="border-bottom:1px solid #e2e8f0;">
+    <td style="padding:10px 14px;color:#64748b;font-weight:600;">Member ID</td>
+    <td style="padding:10px 14px;font-weight:700;color:#b45309;">${memberId || "N/A"}</td>
+  </tr>
+  <tr>
+    <td style="padding:10px 14px;color:#64748b;font-weight:600;">Assigned Role</td>
+    <td style="padding:10px 14px;font-weight:700;color:#059669;">${role || "MEMBER"}</td>
+  </tr>
+</table>
+
+<p style="font-size:13.5px;color:#334155;line-height:1.6;">
+🔑 <b>Password:</b> Please use your existing account password. If you forgot your password, simply click <b>"Forgot Password?"</b> on the login screen to instantly reset it with an OTP sent to this email.
+</p>
+
+${footer}
+`;
+
+/* ===============================
    📢 ANNOUNCEMENT EMAIL (BILINGUAL ✅ FINAL)
 ================================ */
 exports.announcementTemplate = ({
