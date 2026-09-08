@@ -143,6 +143,18 @@ router.post("/login", loginLimiter, async (req, res) => {
       return res.status(500).json({ error: "Server configuration error" });
     }
 
+    // Track login activity
+    await pool.query(
+      "UPDATE users SET last_active_at = NOW() WHERE id = $1",
+      [user.id]
+    ).catch((e) => console.warn("Failed to update last_active_at:", e.message));
+
+    try {
+      await logAudit("USER_LOGIN", "USER", user.id, user.id);
+    } catch (auditErr) {
+      console.warn("Audit log warning on login:", auditErr.message);
+    }
+
     const token = jwt.sign(
       { id: user.id, role: user.role, name: user.name },
       process.env.JWT_SECRET,
@@ -158,6 +170,7 @@ router.post("/login", loginLimiter, async (req, res) => {
         name: user.name,
         username: user.username,
         is_first_login: Boolean(user.is_first_login),
+        last_active_at: new Date().toISOString(),
       },
     });
   } catch (err) {
