@@ -549,6 +549,8 @@ app.use("/community", require("./routes/community"));
 app.use("/whatsapp", require("./routes/whatsapp"));
 app.use("/covid-seva", require("./routes/covidSeva"));
 app.use("/ai", require("./routes/aiContent"));
+app.use("/assets", require("./routes/assets"));
+app.use("/api/assets", require("./routes/assets"));
 
 // WhatsApp auto-init disabled per user directive
 // if (!process.env.VERCEL) {
