@@ -143,11 +143,38 @@ router.post("/login", loginLimiter, async (req, res) => {
       return res.status(500).json({ error: "Server configuration error" });
     }
 
-    // Track login activity
+    // Track genuine login activity
     await pool.query(
-      "UPDATE users SET last_active_at = NOW() WHERE id = $1",
+      `UPDATE users
+       SET last_active_at = NOW(),
+           last_login_at = NOW(),
+           first_login_at = COALESCE(first_login_at, NOW()),
+           login_count = COALESCE(login_count, 0) + 1
+       WHERE id = $1`,
       [user.id]
-    ).catch((e) => console.warn("Failed to update last_active_at:", e.message));
+    ).catch((e) => console.warn("Failed to update login tracking fields:", e.message));
+
+    // Record session in member_login_sessions
+    let sessionId = null;
+    try {
+      const clientIp =
+        (req.headers["x-forwarded-for"] ? req.headers["x-forwarded-for"].split(",")[0].trim() : null) ||
+        req.socket.remoteAddress ||
+        "";
+      const userAgent = req.headers["user-agent"] || "Web Browser";
+      const sessRes = await pool.query(
+        `INSERT INTO member_login_sessions
+         (user_id, member_name, username, role, login_at, ip_address, user_agent, status)
+         VALUES ($1, $2, $3, $4, NOW(), $5, $6, 'ACTIVE')
+         RETURNING id`,
+        [user.id, user.name, user.username, user.role, clientIp, userAgent]
+      );
+      if (sessRes.rows.length > 0) {
+        sessionId = sessRes.rows[0].id;
+      }
+    } catch (sessErr) {
+      console.warn("Failed to insert member_login_sessions:", sessErr.message);
+    }
 
     try {
       await logAudit("USER_LOGIN", "USER", user.id, user.id);
@@ -164,6 +191,7 @@ router.post("/login", loginLimiter, async (req, res) => {
     res.json({
       token,
       role: user.role,
+      sessionId,
       isFirstLogin: Boolean(user.is_first_login),
       user: {
         id: user.id,
@@ -171,6 +199,7 @@ router.post("/login", loginLimiter, async (req, res) => {
         username: user.username,
         is_first_login: Boolean(user.is_first_login),
         last_active_at: new Date().toISOString(),
+        last_login_at: new Date().toISOString(),
       },
     });
   } catch (err) {
@@ -700,7 +729,7 @@ router.post("/first-login-change-password", verifyToken, async (req, res) => {
     // Hash and update
     const hashed = await bcrypt.hash(newPassword, 10);
     await pool.query(
-      "UPDATE users SET password=$1, is_first_login=false WHERE id=$2",
+      "UPDATE users SET password=$1, is_first_login=false, first_login_at=COALESCE(first_login_at, NOW()) WHERE id=$2",
       [hashed, user.id]
     );
 
@@ -724,6 +753,110 @@ router.post("/first-login-change-password", verifyToken, async (req, res) => {
   } catch (err) {
     console.error("FIRST LOGIN CHANGE PASSWORD ERROR 👉", err);
     res.status(500).json({ error: "Failed to update password: " + err.message });
+  }
+});
+
+/* =====================================================
+   🚪 LOGOUT (RECORD LOGOUT TIMESTAMP & SESSION DURATION)
+   POST /auth/logout
+===================================================== */
+router.post("/logout", verifyToken, async (req, res) => {
+  try {
+    const { sessionId } = req.body || {};
+    const userId = req.user.id;
+
+    // 1. Update user last_logout_at
+    await pool.query(
+      "UPDATE users SET last_logout_at = NOW() WHERE id = $1",
+      [userId]
+    ).catch((e) => console.warn("Failed to update last_logout_at:", e.message));
+
+    // 2. Close session in member_login_sessions
+    if (sessionId) {
+      await pool.query(
+        `UPDATE member_login_sessions
+         SET logout_at = NOW(),
+             duration_minutes = GREATEST(1, ROUND(EXTRACT(EPOCH FROM (NOW() - login_at)) / 60)),
+             status = 'LOGGED_OUT'
+         WHERE id = $1 AND user_id = $2`,
+        [sessionId, userId]
+      ).catch((e) => console.warn("Failed to update session by id:", e.message));
+    } else {
+      // Find latest active session for this user
+      await pool.query(
+        `UPDATE member_login_sessions
+         SET logout_at = NOW(),
+             duration_minutes = GREATEST(1, ROUND(EXTRACT(EPOCH FROM (NOW() - login_at)) / 60)),
+             status = 'LOGGED_OUT'
+         WHERE id = (
+           SELECT id FROM member_login_sessions
+           WHERE user_id = $1 AND status = 'ACTIVE'
+           ORDER BY login_at DESC
+           LIMIT 1
+         )`,
+        [userId]
+      ).catch((e) => console.warn("Failed to update latest active session:", e.message));
+    }
+
+    try {
+      await logAudit("USER_LOGOUT", "USER", userId, userId);
+    } catch (_) {}
+
+    res.json({ success: true, message: "Logged out successfully" });
+  } catch (err) {
+    console.error("LOGOUT ERROR 👉", err);
+    res.status(500).json({ error: "Server error during logout" });
+  }
+});
+
+/* =====================================================
+   📊 GET LOGIN & LOGOUT ACTIVITY HISTORY
+   GET /auth/login-activity
+===================================================== */
+router.get("/login-activity", verifyToken, async (req, res) => {
+  try {
+    const allowedRoles = [
+      "SUPER_ADMIN",
+      "PRESIDENT",
+      "VICE_PRESIDENT",
+      "GENERAL_SECRETARY",
+      "JOINT_SECRETARY",
+      "TREASURER",
+      "EC_MEMBER",
+      "AUDITOR",
+    ];
+    if (!allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    const { limit = 100 } = req.query;
+    const { rows } = await pool.query(
+      `SELECT
+         s.id,
+         s.user_id,
+         s.member_name,
+         s.username,
+         s.role,
+         s.login_at,
+         s.logout_at,
+         s.duration_minutes,
+         s.ip_address,
+         s.user_agent,
+         s.status,
+         u.member_id,
+         u.personal_email,
+         u.phone
+       FROM member_login_sessions s
+       LEFT JOIN users u ON u.id = s.user_id
+       ORDER BY s.login_at DESC
+       LIMIT $1`,
+      [Math.min(200, parseInt(limit) || 100)]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    console.error("GET LOGIN ACTIVITY ERROR 👉", err.message);
+    res.status(500).json({ error: "Failed to fetch login activity: " + err.message });
   }
 });
 

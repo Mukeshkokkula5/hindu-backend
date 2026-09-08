@@ -61,6 +61,10 @@ router.get(
           COALESCE(blood_group, 'B+') AS blood_group,
           COALESCE(photo_url, '/images/leader-president.png') AS photo_url,
           is_first_login,
+          first_login_at,
+          last_login_at,
+          last_logout_at,
+          login_count,
           last_active_at,
           created_at
         FROM users
