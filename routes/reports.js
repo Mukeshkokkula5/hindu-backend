@@ -725,4 +725,242 @@ router.get("/pdf/member-wise", async (req, res) => {
   }
 });
 
+/* ======================================================
+   4. PDF: MEMBER LOGIN & PORTAL ADOPTION AUDIT REPORT
+====================================================== */
+router.get("/pdf/member-login-activity", async (req, res) => {
+  try {
+    const meta = await getAssociationMeta();
+
+    const [membersRes, sessionsRes] = await Promise.all([
+      pool.query(`
+        SELECT
+          member_id, name, username, role, phone, personal_email,
+          first_login_at, last_login_at, last_logout_at, login_count
+        FROM users
+        WHERE role != 'SUPER_ADMIN'
+        ORDER BY first_login_at ASC NULLS LAST, member_id ASC
+      `),
+      pool.query(`
+        SELECT
+          member_name, username, role, login_at, logout_at,
+          duration_minutes, status, ip_address
+        FROM member_login_sessions
+        ORDER BY login_at DESC
+        LIMIT 30
+      `),
+    ]);
+
+    const allMembers = membersRes.rows;
+    const loggedIn = allMembers.filter((m) => !!m.first_login_at || Number(m.login_count) > 0);
+    const neverLoggedIn = allMembers.filter((m) => !m.first_login_at && (!m.login_count || Number(m.login_count) === 0));
+    const sessions = sessionsRes.rows;
+
+    const doc = new PDFDocument({ size: "A4", margin: 40, bufferPages: true });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="HSY_Member_Login_Audit_Report.pdf"`);
+    doc.pipe(res);
+
+    renderPdfHeader(doc, meta, "Member Portal Adoption & Login Audit Report", "Genuine Committee Login Timestamps & Pending Members Follow-Up");
+
+    // KPI Summary Box
+    let curY = doc.y;
+    const boxW = (doc.page.width - 80 - 20) / 3;
+
+    // Box 1: Total
+    doc.rect(40, curY, boxW, 45).fillAndStroke("#f8fafc", "#cbd5e1");
+    doc.font("Helvetica-Bold").fontSize(8).fillColor("#64748b").text("TOTAL REGISTERED", 50, curY + 8);
+    doc.font("Helvetica-Bold").fontSize(16).fillColor("#0f172a").text(`${allMembers.length}`, 50, curY + 20);
+    doc.font("Helvetica").fontSize(7).fillColor("#64748b").text("All Committee Members", 50, curY + 35);
+
+    // Box 2: Logged In
+    doc.rect(40 + boxW + 10, curY, boxW, 45).fillAndStroke("#f0fdf4", "#86efac");
+    doc.font("Helvetica-Bold").fontSize(8).fillColor("#166534").text("LOGGED IN / ACTIVE", 50 + boxW + 10, curY + 8);
+    doc.font("Helvetica-Bold").fontSize(16).fillColor("#15803d").text(`${loggedIn.length}`, 50 + boxW + 10, curY + 20);
+    doc.font("Helvetica").fontSize(7).fillColor("#166534").text(`Using Portal (${allMembers.length > 0 ? Math.round((loggedIn.length / allMembers.length) * 100) : 0}%)`, 50 + boxW + 10, curY + 35);
+
+    // Box 3: Never Logged In
+    doc.rect(40 + (boxW + 10) * 2, curY, boxW, 45).fillAndStroke("#fef2f2", "#fca5a5");
+    doc.font("Helvetica-Bold").fontSize(8).fillColor("#991b1b").text("NEVER LOGGED IN", 50 + (boxW + 10) * 2, curY + 8);
+    doc.font("Helvetica-Bold").fontSize(16).fillColor("#dc2626").text(`${neverLoggedIn.length}`, 50 + (boxW + 10) * 2, curY + 20);
+    doc.font("Helvetica").fontSize(7).fillColor("#991b1b").text("Pending 1st Portal Login", 50 + (boxW + 10) * 2, curY + 35);
+
+    curY += 56;
+
+    // SECTION 1: LOGGED IN MEMBERS TABLE
+    doc.font("Helvetica-Bold").fontSize(10).fillColor("#166534").text(`1. VERIFIED LOGGED IN MEMBERS (${loggedIn.length})`, 40, curY);
+    curY += 16;
+
+    doc.rect(40, curY, doc.page.width - 80, 18).fill("#dcfce7");
+    doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#166534")
+      .text("Sl", 45, curY + 5)
+      .text("Member ID", 65, curY + 5)
+      .text("Name", 155, curY + 5)
+      .text("Role", 265, curY + 5)
+      .text("1st Login (IST)", 360, curY + 5)
+      .text("Last Logout (IST)", 450, curY + 5)
+      .text("Logins", 515, curY + 5, { width: 35, align: "right" });
+
+    curY += 19;
+    doc.font("Helvetica").fontSize(7).fillColor("#1e293b");
+
+    loggedIn.forEach((m, idx) => {
+      if (curY > doc.page.height - 120) {
+        doc.addPage();
+        renderPdfHeader(doc, meta, "Member Portal Adoption & Login Audit Report", "Page 2 - Verified Logged In Members");
+        curY = doc.y;
+        doc.rect(40, curY, doc.page.width - 80, 18).fill("#dcfce7");
+        doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#166534")
+          .text("Sl", 45, curY + 5)
+          .text("Member ID", 65, curY + 5)
+          .text("Name", 155, curY + 5)
+          .text("Role", 265, curY + 5)
+          .text("1st Login (IST)", 360, curY + 5)
+          .text("Last Logout (IST)", 450, curY + 5)
+          .text("Logins", 515, curY + 5, { width: 35, align: "right" });
+        curY += 19;
+        doc.font("Helvetica").fontSize(7);
+      }
+      if (idx % 2 === 1) doc.rect(40, curY - 2, doc.page.width - 80, 15).fill("#f0fdf4");
+      const firstStr = m.first_login_at
+        ? new Date(m.first_login_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
+        : "N/A";
+      const logoutStr = m.last_logout_at
+        ? new Date(m.last_logout_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
+        : "Active / None";
+
+      doc.fillColor("#0f172a")
+        .text(String(idx + 1), 45, curY)
+        .text(m.member_id || "N/A", 65, curY)
+        .text(m.name || "Member", 155, curY, { width: 105, lineBreak: false })
+        .text(m.role || "MEMBER", 265, curY, { width: 90, lineBreak: false })
+        .text(firstStr, 360, curY)
+        .text(logoutStr, 450, curY)
+        .text(String(m.login_count || 1), 515, curY, { width: 35, align: "right" });
+      curY += 15;
+    });
+
+    curY += 14;
+
+    // SECTION 2: NEVER LOGGED IN MEMBERS TABLE (PENDING ACTION)
+    if (curY > doc.page.height - 180) {
+      doc.addPage();
+      renderPdfHeader(doc, meta, "Member Portal Adoption & Login Audit Report", "Members Pending First Login");
+      curY = doc.y;
+    }
+
+    doc.font("Helvetica-Bold").fontSize(10).fillColor("#991b1b").text(`2. MEMBERS PENDING FIRST LOGIN (${neverLoggedIn.length}) - ACTION REQUIRED`, 40, curY);
+    curY += 16;
+
+    doc.rect(40, curY, doc.page.width - 80, 18).fill("#fee2e2");
+    doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#991b1b")
+      .text("Sl", 45, curY + 5)
+      .text("Member ID", 65, curY + 5)
+      .text("Name", 160, curY + 5)
+      .text("Role", 280, curY + 5)
+      .text("Phone Number", 390, curY + 5)
+      .text("Adoption Status", 460, curY + 5, { width: 90, align: "right" });
+
+    curY += 19;
+    doc.font("Helvetica").fontSize(7).fillColor("#1e293b");
+
+    neverLoggedIn.forEach((m, idx) => {
+      if (curY > doc.page.height - 130) {
+        doc.addPage();
+        renderPdfHeader(doc, meta, "Member Portal Adoption & Login Audit Report", "Members Pending First Login (Continued)");
+        curY = doc.y;
+        doc.rect(40, curY, doc.page.width - 80, 18).fill("#fee2e2");
+        doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#991b1b")
+          .text("Sl", 45, curY + 5)
+          .text("Member ID", 65, curY + 5)
+          .text("Name", 160, curY + 5)
+          .text("Role", 280, curY + 5)
+          .text("Phone Number", 390, curY + 5)
+          .text("Adoption Status", 460, curY + 5, { width: 90, align: "right" });
+        curY += 19;
+        doc.font("Helvetica").fontSize(7);
+      }
+      if (idx % 2 === 1) doc.rect(40, curY - 2, doc.page.width - 80, 15).fill("#fef2f2");
+      doc.fillColor("#0f172a")
+        .text(String(idx + 1), 45, curY)
+        .text(m.member_id || "N/A", 65, curY)
+        .text(m.name || "Member", 160, curY, { width: 115, lineBreak: false })
+        .text(m.role || "MEMBER", 280, curY, { width: 105, lineBreak: false })
+        .text(m.phone || "No phone", 390, curY)
+        .text("🔴 0 Logins / Pending", 460, curY, { width: 90, align: "right" });
+      curY += 15;
+    });
+
+    // SECTION 3: RECENT AUDITED SESSIONS
+    if (sessions.length > 0) {
+      if (curY > doc.page.height - 180) {
+        doc.addPage();
+        renderPdfHeader(doc, meta, "Member Portal Adoption & Login Audit Report", "Recent Login & Logout Audit Sessions");
+        curY = doc.y;
+      } else {
+        curY += 16;
+      }
+
+      doc.font("Helvetica-Bold").fontSize(10).fillColor("#1e293b").text(`3. RECENT LOGIN & LOGOUT SESSION TRAILS (${sessions.length} Sessions)`, 40, curY);
+      curY += 16;
+
+      doc.rect(40, curY, doc.page.width - 80, 18).fill("#f1f5f9");
+      doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#334155")
+        .text("Sl", 45, curY + 5)
+        .text("Member Name", 65, curY + 5)
+        .text("Role", 170, curY + 5)
+        .text("Login Time (IST)", 265, curY + 5)
+        .text("Logout Time (IST)", 370, curY + 5)
+        .text("Duration", 475, curY + 5)
+        .text("Status", 520, curY + 5);
+
+      curY += 19;
+      doc.font("Helvetica").fontSize(7).fillColor("#1e293b");
+
+      sessions.forEach((s, idx) => {
+        if (curY > doc.page.height - 120) {
+          doc.addPage();
+          renderPdfHeader(doc, meta, "Member Portal Adoption & Login Audit Report", "Recent Login & Logout Audit Sessions (Continued)");
+          curY = doc.y;
+          doc.rect(40, curY, doc.page.width - 80, 18).fill("#f1f5f9");
+          doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#334155")
+            .text("Sl", 45, curY + 5)
+            .text("Member Name", 65, curY + 5)
+            .text("Role", 170, curY + 5)
+            .text("Login Time (IST)", 265, curY + 5)
+            .text("Logout Time (IST)", 370, curY + 5)
+            .text("Duration", 475, curY + 5)
+            .text("Status", 520, curY + 5);
+          curY += 19;
+          doc.font("Helvetica").fontSize(7);
+        }
+        if (idx % 2 === 1) doc.rect(40, curY - 2, doc.page.width - 80, 15).fill("#f8fafc");
+        const logInTime = s.login_at
+          ? new Date(s.login_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
+          : "N/A";
+        const logOutTime = s.logout_at
+          ? new Date(s.logout_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
+          : "Active Now";
+        const duration = s.duration_minutes ? `${s.duration_minutes}m` : (s.logout_at ? "<1m" : "Live");
+
+        doc.fillColor("#0f172a")
+          .text(String(idx + 1), 45, curY)
+          .text(s.member_name || s.username || "Member", 65, curY, { width: 100, lineBreak: false })
+          .text(s.role || "MEMBER", 170, curY, { width: 90, lineBreak: false })
+          .text(logInTime, 265, curY)
+          .text(logOutTime, 370, curY)
+          .text(duration, 475, curY)
+          .text(s.status || "LOGGED_OUT", 520, curY);
+        curY += 15;
+      });
+    }
+
+    renderPdfFooterAndSignatures(doc, meta);
+    doc.end();
+  } catch (err) {
+    console.error("GENERATE LOGIN ACTIVITY PDF ERROR:", err);
+    res.status(500).json({ error: "Failed to generate member login activity PDF: " + err.message });
+  }
+});
+
 module.exports = router;
